@@ -84,6 +84,19 @@ See [docs/visual-language.md](docs/visual-language.md) for how the reference
 creatures map onto these generators, and [docs/roadmap.md](docs/roadmap.md) for
 what comes next.
 
+## Editor automation
+
+Editor Python can use `unreal.EclipseEditorLibrary.grow_on_selection(settings)`
+and `rebuild_materials(settings)` with an `unreal.EclipseGrowthSettings` object.
+These use the same generation paths as the panel and leave new assets and the
+level unsaved. They require a stopped editor world.
+
+`get_surface_seed_locations(static_mesh_component)` returns a deterministic
+world-space triangle centroid for each connected surface island. Instanced
+hosts still require ordinary mesh receivers at each instance's world transform.
+For a batch of overlapping receivers, enable only the selected receiver's seed
+group while growing it, then disable that group before processing the next one.
+
 ## Output contract
 
 The `.glb` holds two meshes, `EclipseSurface` (the corrupted host) and
