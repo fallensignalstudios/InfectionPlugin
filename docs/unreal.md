@@ -91,6 +91,35 @@ Limits for now:
 
 ![A grown arm swung down through the transferred weights](previews/skinned_pose.jpg)
 
+## Spreading, receding and burning during play
+
+Every grow also adds an **Eclipse Spread** component to the host actor and
+writes `IM_Eclipse_<Host>`, a sparse record of where the corruption is and when
+each part of it arrived. At runtime the component drives every Eclipse material
+on the host and on the actors attached to it.
+
+![The spread playing out from two seeds, then a burn cutting it back](previews/spread_and_burn.jpg)
+
+| On the component | |
+|---|---|
+| `Growth` | How far the spread has played: 0 nothing, 1 the corruption as grown, 1.4 (`FullGrowth`) also the veins that ran ahead. |
+| `bSpreadOnBeginPlay`, `SpreadDuration` | Start from nothing when play begins and take this many seconds to finish. |
+| `StartSpread`, `Recede`, `SetPlayRate`, `SetGrowth` | Drive it from Blueprint: play forward, play backward, any speed, or jump. |
+| `OnSpreadFinished`, `OnFullyReceded` | Events at either end. |
+| `Burn(Location, Radius)`, `ClearBurns` | Cut the corruption away in a sphere; the edge smoulders with ember light (`EmberColor`, `BurnSoftness`). The four latest burns are kept. |
+| `GetInfectionAt(Location, Radius)`, `IsInfectedAt` | How infected a spot is right now (0..1): arrived, not burned. Use it for damage zones, AI avoidance, audio. |
+
+Notes:
+- Burns and queries need the materials from this version: press **Rebuild
+  Materials** once if you grew with an earlier one.
+- The component changes the materials only in play (PIE, Simulate or a
+  build). In the editor, preview a stage by setting `Growth` on the
+  `MI_Eclipse_*` instances.
+- Animate spreads in **Overlay** mode. In Replace mode the plates' raised
+  shape stays visible, in the host colour, ahead of the spread.
+- `GetInfectionAt` on a character answers for its reference pose, not its
+  current animation.
+
 ## The material
 
 The first grow creates `<Output Folder>/Materials/M_EclipseBiomass` and three
@@ -113,6 +142,8 @@ The master is masked, two-sided and clear-coat. Its logic is five small Custom
 | `PulseSpeed`, `PulseAmount` | 0.6, 0.35 | Waves of light travelling outward from the seed. |
 | `CarapaceColor`, `CarapaceTint` | near-black, violet | The shell; the tint varies per plate. |
 | `GlowColor` | violet | |
+| `EmberColor`, `BurnSoftness` | orange, 40 cm | The smouldering edge of a burn, and its width. |
+| `Burn0`..`Burn3` | unused | Set by the Eclipse Spread component: centre in RGB, radius in A. |
 | `InflamedColor` | dark magenta | Tissue at the front, before it blackens. |
 | `HostColor` | grey | Clean tissue, Replace mode only. |
 | `ClearCoatRoughness` | 0.06 | The wet sheen. |

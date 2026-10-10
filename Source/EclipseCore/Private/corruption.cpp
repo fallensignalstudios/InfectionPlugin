@@ -10,6 +10,7 @@
 #include <unordered_map>
 
 #include "eclipse/random.h"
+#include "eclipse/spatial.h"
 
 namespace eclipse {
 
@@ -481,6 +482,37 @@ Mesh extractShell(const Mesh& surface, float offset, std::vector<uint32_t>* sour
         shell.triangles.push_back(r);
     }
     return shell;
+}
+
+std::vector<InfectionSample> sampleInfection(const Mesh& surface, float spacing) {
+    std::vector<InfectionSample> samples;
+    if (surface.attributes.size() != surface.positions.size() || spacing <= 0.0f) return samples;
+    std::vector<uint32_t> touched;
+    for (uint32_t v = 0; v < surface.positions.size(); ++v) {
+        const auto& a = surface.attributes[v];
+        if (a.infection > 0.0f || a.glow > 0.0f) touched.push_back(v);
+    }
+    // Earliest first, so the sample standing for a patch is its oldest tissue.
+    std::stable_sort(touched.begin(), touched.end(), [&](uint32_t a, uint32_t b) {
+        return surface.attributes[a].arrival < surface.attributes[b].arrival;
+    });
+    std::vector<uint32_t> sites = poissonThin(surface.positions, touched, spacing);
+    for (uint32_t v : sites) samples.push_back({surface.positions[v], surface.attributes[v].arrival, 0.0f});
+
+    // Each touched vertex lends its strength to its nearest sample, and its
+    // arrival if earlier.
+    std::vector<Vec3> sitePositions;
+    for (const auto& s : samples) sitePositions.push_back(s.position);
+    PointGrid grid(sitePositions, spacing);
+    for (uint32_t v : touched) {
+        int32_t nearest = grid.nearest(surface.positions[v], spacing * 1.5f);
+        if (nearest < 0) continue;
+        const auto& a = surface.attributes[v];
+        auto& s = samples[static_cast<size_t>(nearest)];
+        s.infection = std::max({s.infection, a.infection, a.glow});
+        s.arrival = std::min(s.arrival, a.arrival);
+    }
+    return samples;
 }
 
 uint64_t meshHash(const Mesh& mesh) {
