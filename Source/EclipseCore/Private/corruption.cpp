@@ -459,6 +459,28 @@ Mesh corrupt(const Mesh& host, const std::vector<Vec3>& seeds, const GrowthParam
     return growSurface(host, seeds, params).surface;
 }
 
+Mesh extractShell(const Mesh& surface, float offset) {
+    Mesh shell;
+    if (surface.attributes.size() != surface.positions.size()) return shell;
+    auto touched = [&](uint32_t v) { return surface.attributes[v].infection > 0.0f || surface.attributes[v].glow > 0.0f; };
+    std::vector<int32_t> remap(surface.positions.size(), -1);
+    for (const auto& t : surface.triangles) {
+        if (!touched(t[0]) && !touched(t[1]) && !touched(t[2])) continue;
+        std::array<uint32_t, 3> r{};
+        for (int i = 0; i < 3; ++i) {
+            if (remap[t[i]] < 0) {
+                remap[t[i]] = static_cast<int32_t>(shell.positions.size());
+                shell.positions.push_back(surface.positions[t[i]] + surface.normals[t[i]] * offset);
+                shell.normals.push_back(surface.normals[t[i]]);
+                shell.attributes.push_back(surface.attributes[t[i]]);
+            }
+            r[i] = static_cast<uint32_t>(remap[t[i]]);
+        }
+        shell.triangles.push_back(r);
+    }
+    return shell;
+}
+
 uint64_t meshHash(const Mesh& mesh) {
     uint64_t h = 1469598103934665603ull;
     auto mix = [&](int64_t value) {

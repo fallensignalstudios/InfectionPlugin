@@ -1,6 +1,6 @@
 #include "eclipse/export.h"
 
-#include <cstdio>
+#include <fstream>
 #include <cstring>
 #include <sstream>
 #include <vector>
@@ -162,13 +162,14 @@ bool writeGlb(const std::string& path, const std::vector<NamedMesh>& meshes, std
     appendU32(file, 0x004E4942u);  // "BIN\0"
     appendBytes(file, bin.data(), bin.size());
 
-    FILE* f = std::fopen(path.c_str(), "wb");
+    std::ofstream f(path, std::ios::binary);
     if (!f) {
         if (error) *error = "cannot write " + path;
         return false;
     }
-    bool ok = std::fwrite(file.data(), 1, file.size(), f) == file.size();
-    ok = (std::fclose(f) == 0) && ok;
+    f.write(reinterpret_cast<const char*>(file.data()), static_cast<std::streamsize>(file.size()));
+    f.close();
+    bool ok = !f.fail();
     if (!ok && error) *error = "failed writing " + path;
     return ok;
 }

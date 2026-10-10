@@ -96,6 +96,12 @@ SurfaceGrowth growSurface(const Mesh& host, const std::vector<Vec3>& seeds, cons
 // Just the corrupted surface; see growSurface.
 Mesh corrupt(const Mesh& host, const std::vector<Vec3>& seeds, const GrowthParams& params);
 
+// The part of a corrupted surface that differs from the clean host: every
+// triangle touching infection or glow, lifted `offset` along the normals so
+// it sits just above the original. Rendered over the untouched host with a
+// masked material, the host keeps its own materials everywhere else.
+Mesh extractShell(const Mesh& surface, float offset);
+
 // Stable fingerprint of a mesh's geometry and attributes, for regression tests.
 uint64_t meshHash(const Mesh& mesh);
 

@@ -26,21 +26,22 @@ function(eclipse_warnings target)
   endif()
 endfunction()
 
-# The core has no dependency beyond the standard library, so the same sources
-# build inside the Unreal plugin.
+# The core has no dependency beyond the standard library. Its sources live in
+# the Unreal plugin's EclipseCore module so there is exactly one copy; this
+# project builds them on their own for the CLI and the tests.
 add_library(eclipse_core STATIC
-  core/src/corruption.cpp
-  core/src/export.cpp
-  core/src/geometry.cpp
-  core/src/growths.cpp
-  core/src/hosts.cpp
-  core/src/mesh.cpp
-  core/src/noise.cpp
-  core/src/preview.cpp
-  core/src/sdf.cpp
-  core/src/spatial.cpp
+  Source/EclipseCore/Private/corruption.cpp
+  Source/EclipseCore/Private/export.cpp
+  Source/EclipseCore/Private/geometry.cpp
+  Source/EclipseCore/Private/growths.cpp
+  Source/EclipseCore/Private/hosts.cpp
+  Source/EclipseCore/Private/mesh.cpp
+  Source/EclipseCore/Private/noise.cpp
+  Source/EclipseCore/Private/preview.cpp
+  Source/EclipseCore/Private/sdf.cpp
+  Source/EclipseCore/Private/spatial.cpp
 )
-target_include_directories(eclipse_core PUBLIC core/include)
+target_include_directories(eclipse_core PUBLIC Source/EclipseCore/Public)
 eclipse_warnings(eclipse_core)
 
 add_executable(eclipse-cli cli/main.cpp)

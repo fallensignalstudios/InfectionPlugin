@@ -3,3 +3,6 @@ out/
 smoke/
 .vs/
 CMakeUserPresets.json
+# Unreal build output when the repo sits in a project's Plugins folder
+Binaries/
+Intermediate/

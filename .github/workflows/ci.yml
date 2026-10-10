@@ -25,6 +25,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - name: Plugin descriptor parses
+        shell: bash
+        run: python3 -c "import json; json.load(open('InfectionPlugin.uplugin'))" || python -c "import json; json.load(open('InfectionPlugin.uplugin'))"
       - name: Configure
         shell: bash
         run: |

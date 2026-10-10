@@ -2,7 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdio>
+#include <fstream>
 #include <limits>
 
 namespace eclipse {
@@ -247,10 +247,11 @@ bool writePng(const std::string& path, const Image& image) {
     chunk("IDAT", z);
     chunk("IEND", {});
 
-    FILE* f = std::fopen(path.c_str(), "wb");
+    std::ofstream f(path, std::ios::binary);
     if (!f) return false;
-    bool ok = std::fwrite(out.data(), 1, out.size(), f) == out.size();
-    return (std::fclose(f) == 0) && ok;
+    f.write(reinterpret_cast<const char*>(out.data()), static_cast<std::streamsize>(out.size()));
+    f.close();
+    return !f.fail();
 }
 
 }  // namespace eclipse

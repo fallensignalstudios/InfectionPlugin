@@ -1,0 +1,19 @@
+// The engine-independent generator. These are the same sources the CMake
+// project builds for the command-line tool and the tests, so they include no
+// Unreal headers; only EclipseCoreModule.cpp knows about the engine.
+
+using UnrealBuildTool;
+
+public class EclipseCore : ModuleRules
+{
+	public EclipseCore(ReadOnlyTargetRules Target) : base(Target)
+	{
+		// Plain standard C++: keep Unreal's shared precompiled header and its
+		// macros out of these files, and compile each file on its own.
+		PCHUsage = PCHUsageMode.NoPCHs;
+		bUseUnity = false;
+		bEnableExceptions = true;
+
+		PublicDependencyModuleNames.Add("Core");
+	}
+}

@@ -51,6 +51,17 @@ struct VertexGraph {
     size_t degree(uint32_t v) const { return offsets[v + 1] - offsets[v]; }
 };
 
+// Merges vertices closer than `tolerance` (game meshes often split vertices
+// along UV or smoothing seams, which would stop the spread at the seam).
+// Drops triangles that collapse. Normals and attributes are discarded.
+void weldVertices(Mesh& mesh, float tolerance);
+
+// Splits every edge longer than `maxEdge` at its midpoint, repeatedly, until
+// none remain; the surface keeps its exact shape. Corruption detail lives on
+// vertices, so a sparse game mesh must be refined first. Returns false and
+// leaves the mesh untouched if the result would exceed `maxVertices`.
+bool subdivideToEdgeLength(Mesh& mesh, float maxEdge, size_t maxVertices);
+
 // One third of the area of every incident triangle.
 std::vector<float> vertexAreas(const Mesh& mesh);
 

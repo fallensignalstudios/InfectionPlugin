@@ -566,6 +566,95 @@ TEST(glb_holds_surface_and_growths_as_separate_meshes) {
     CHECK(!writeGlb(path, {{"Nothing", &empty}}));
 }
 
+// A unit cube with every face's vertices split apart, as game exporters
+// often deliver them (separate vertices per face for hard normals).
+Mesh splitCube() {
+    Mesh m;
+    const Vec3 c[8] = {{0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {0, 1, 0}, {0, 0, 1}, {1, 0, 1}, {1, 1, 1}, {0, 1, 1}};
+    const int faces[6][4] = {{0, 3, 2, 1}, {4, 5, 6, 7}, {0, 1, 5, 4}, {2, 3, 7, 6}, {1, 2, 6, 5}, {0, 4, 7, 3}};
+    for (const auto& f : faces) {
+        uint32_t base = static_cast<uint32_t>(m.positions.size());
+        for (int i : f) m.positions.push_back(c[i]);
+        m.triangles.push_back({base, base + 1, base + 2});
+        m.triangles.push_back({base, base + 2, base + 3});
+    }
+    return m;
+}
+
+double totalArea(const Mesh& m) {
+    double a = 0;
+    for (float v : vertexAreas(m)) a += v;
+    return a;
+}
+
+TEST(welding_joins_split_seams) {
+    Mesh m = splitCube();
+    CHECK(m.vertexCount() == 24);
+    CHECK(brokenEdges(m) > 0);
+    weldVertices(m, 1e-4f);
+    CHECK(m.vertexCount() == 8);
+    CHECK(m.triangleCount() == 12);
+    CHECK(brokenEdges(m) == 0);
+    CHECK(signedVolume(m) > 0.99 && signedVolume(m) < 1.01);
+}
+
+TEST(subdivision_refines_without_changing_shape) {
+    Mesh m = splitCube();
+    weldVertices(m, 1e-4f);
+    CHECK(subdivideToEdgeLength(m, 0.1f, 1000000));
+    CHECK(m.vertexCount() > 500);
+    CHECK(brokenEdges(m) == 0);  // no cracks or T-junctions
+    float longest = 0;
+    for (const auto& t : m.triangles)
+        for (int i = 0; i < 3; ++i) longest = std::max(longest, length(m.positions[t[i]] - m.positions[t[(i + 1) % 3]]));
+    CHECK(longest <= 0.1f);
+    CHECK(std::fabs(totalArea(m) - 6.0) < 1e-3);
+    CHECK(std::fabs(signedVolume(m) - 1.0) < 1e-3);
+    bool onSurface = true;
+    for (const auto& p : m.positions) {
+        float edge = std::min({std::fabs(p.x), std::fabs(p.x - 1), std::fabs(p.y), std::fabs(p.y - 1), std::fabs(p.z),
+                               std::fabs(p.z - 1)});
+        onSurface = onSurface && edge < 1e-5f;
+    }
+    CHECK(onSurface);
+    CHECK(m.normals.size() == m.vertexCount());
+}
+
+TEST(subdivision_refuses_an_oversized_result) {
+    Mesh m = splitCube();
+    weldVertices(m, 1e-4f);
+    Mesh before = m;
+    CHECK(!subdivideToEdgeLength(m, 0.001f, 100000));
+    CHECK(m.positions.size() == before.positions.size() && m.triangles == before.triangles);
+}
+
+TEST(shell_holds_only_the_corruption_lifted_off_the_host) {
+    GrowthParams p;
+    p.coverage = 0.3f;
+    Mesh surface = corrupt(mannequin().mesh, mannequin().defaultSeeds, p);
+    Mesh shell = extractShell(surface, 0.002f);
+    CHECK(shell.vertexCount() > 1000);
+    CHECK(shell.vertexCount() < surface.vertexCount() * 6 / 10);
+    CHECK(shell.attributes.size() == shell.vertexCount() && shell.normals.size() == shell.vertexCount());
+    size_t touchedTriangles = 0;
+    for (const auto& t : surface.triangles) {
+        bool touched = false;
+        for (uint32_t v : t) touched = touched || surface.attributes[v].infection > 0 || surface.attributes[v].glow > 0;
+        touchedTriangles += touched;
+    }
+    CHECK(shell.triangleCount() == touchedTriangles);
+    // Every shell vertex is its surface vertex moved out along the normal.
+    PointGrid grid(surface.positions, 0.02f);
+    bool lifted = true;
+    for (size_t i = 0; i < shell.vertexCount(); i += 13) {
+        int32_t v = grid.nearest(shell.positions[i] - shell.normals[i] * 0.002f, 1e-4f);
+        lifted = lifted && v >= 0;
+    }
+    CHECK(lifted);
+    Mesh clean = mannequin().mesh;
+    CHECK(extractShell(clean, 0.002f).vertexCount() == 0);  // no attributes, nothing to lift
+}
+
 int main(int argc, char** argv) {
     // Unbuffered, so a crash still shows which test was running.
     std::setvbuf(stdout, nullptr, _IONBF, 0);
