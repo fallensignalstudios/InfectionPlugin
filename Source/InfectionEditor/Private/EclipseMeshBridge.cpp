@@ -209,9 +209,9 @@ namespace EclipseBridge
 		const bool bHasNormals = Mesh.normals.size() == Mesh.positions.size();
 		const bool bHasAttributes = Mesh.attributes.size() == Mesh.positions.size();
 		check(!Skin || Skin->size() == Mesh.positions.size());
-		// The mesh build stores colours as sRGB bytes and the material reads
-		// those bytes back raw, so hand it the linear value whose sRGB byte is
-		// the number we want the material to see.
+		// Static meshes encode description colours as sRGB bytes; skeletal
+		// meshes quantize them directly. Both materials must read the same
+		// corruption data from the resulting raw vertex-colour bytes.
 		auto Channel = [](float Value) { return static_cast<uint8>(FMath::Clamp(FMath::RoundToInt(Value * 255.0f), 0, 255)); };
 
 		// Generated geometry is world space relative to the host's location.
@@ -262,7 +262,7 @@ namespace EclipseBridge
 			{
 				const eclipse::CorruptionAttributes& A = Mesh.attributes[Index];
 				const FColor Bytes(Channel(A.infection), Channel(A.glow), Channel(A.crack), Channel(A.plateTint));
-				Colors[Instance] = FVector4f(FLinearColor(Bytes));
+				Colors[Instance] = FVector4f(Skin ? Bytes.ReinterpretAsLinear() : FLinearColor(Bytes));
 				UVs.Set(Instance, 0, FVector2f(A.arrival, A.height));
 			}
 			Instances[Index] = Instance;
@@ -374,6 +374,18 @@ namespace EclipseBridge
 		{
 			Mesh->Modify();
 		}
+
+		// Re-growing keeps this asset's identity, but the host can now use a
+		// different skeleton or reference pose. Its new weights use the current
+		// host's bone indices, so refresh the binding and physics metadata too.
+		Mesh->SetRefSkeleton(Template->GetRefSkeleton());
+		Mesh->SetSkeleton(Template->GetSkeleton());
+		Mesh->GetRefBasesInvMatrix().Reset();
+		// CalculateInvRefMatrices otherwise reuses the cache when bone counts
+		// match, even if the host's reference transforms have changed.
+		Mesh->CalculateInvRefMatrices();
+		Mesh->SetPhysicsAsset(Template->GetPhysicsAsset());
+		Mesh->SetShadowPhysicsAsset(Template->GetShadowPhysicsAsset());
 
 		// One LOD, no morph targets: the copy's other LODs and shapes belong
 		// to the host's geometry, not this.

@@ -1,6 +1,6 @@
 // The engine-independent generator. These are the same sources the CMake
-// project builds for the command-line tool and the tests, so they include no
-// Unreal headers; only EclipseCoreModule.cpp knows about the engine.
+// project builds for the command-line tool and the tests. The API header only
+// includes Unreal's platform definitions when UBT supplies the module exports.
 
 using UnrealBuildTool;
 

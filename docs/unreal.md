@@ -22,7 +22,7 @@ The plugin has three modules:
 
 | Module | Type | What it holds |
 |---|---|---|
-| `EclipseCore` | Runtime | The generator itself: the same plain C++ sources the CLI and tests build. No Unreal headers. |
+| `EclipseCore` | Runtime | The generator itself: the same plain C++ sources the CLI and tests build. Its API header includes Unreal's platform definitions only during an Unreal build. |
 | `InfectionRuntime` | Runtime | The **Eclipse Seed** actor (editor-only, stripped from cooked builds). |
 | `InfectionEditor` | Editor | The **Eclipse Growth** panel, mesh conversion, asset writing and the materials. |
 
@@ -124,18 +124,26 @@ The vertex data the material reads is listed in the README's output contract.
 
 The generator core is built and tested on Windows, Linux, GCC, Clang and MSVC
 by CI, including as a DLL that exports only the functions marked
-`ECLIPSECORE_API`, the way the Unreal editor links it. The editor module cannot
-be built without the engine; the static-mesh path has been built and run in
-UE 5.8, the skeletal path (characters) only written and reviewed so far. Engine
-APIs it relies on that have moved between versions, and what to change:
+`ECLIPSECORE_API`, the way the Unreal editor links it. On UE 5.8.3, the plugin's
+Editor, Game Development and Game Shipping builds have passed with precompiled
+headers and unity builds disabled (`BuildPlugin -TargetPlatforms=Win64 -StrictIncludes`).
+The 34 standalone tests and two Unreal automation tests also pass. Run the
+Unreal tests with `Automation RunTests Infection.Editor.SkeletalMesh`: they
+check corruption-channel bytes through the skeletal importer, and rebuilding
+an existing asset after changing its host skeleton or reference pose. Both
+tests failed before their fixes. These synthetic fixtures do not qualify the
+appearance or animation of a production character.
+
+Engine APIs that have moved between versions, and what to check:
 
 | Symptom | Where | Fix |
 |---|---|---|
+| Syntax errors at `ECLIPSECORE_API` declarations in a no-PCH build | `eclipse/api.h` | UBT's export macros require `HAL/Platform.h`; include it only when building an Unreal module so standalone builds stay portable. |
 | `GetMeshDescription` / `CreateMeshDescription` / `CommitMeshDescription` errors | `EclipseMeshBridge.cpp` | These are the standard UStaticMesh editor calls; check their current signatures in `Engine/StaticMesh.h`. |
 | `FCustomInput::InputName` type mismatch | `EclipseMaterials.cpp` | It is an `FName` in UE5; if it became an `FString`, drop the `FName(...)` wrap. |
 | `UMaterialEditingLibrary` missing | `InfectionEditor.Build.cs` | It lives in the `MaterialEditor` module, already listed. |
 | Material settings not applied | `EclipseMaterials.cpp` | Blend mode and two-sided are set by property name; check the names `BlendMode` and `TwoSided` on `UMaterial`. |
 | Nanite not enabled on outputs | `EclipseMeshBridge.cpp` | Set by property name `NaniteSettings.bEnabled`; enable it in the mesh editor meanwhile. |
-| Skeletal output is empty or fails to commit | `EclipseMeshBridge.cpp`, `WriteSkeletalMesh` | The mesh description is built fresh with skin weights but no bone list; if the engine wants bones in the description, copy them from the host's description before committing. |
+| Skeletal output is empty or fails to commit | `EclipseMeshBridge.cpp`, `WriteSkeletalMesh` | The description includes skin weights and the host's reference bones; check the current skeletal mesh commit and build APIs. |
 
 Paste the compiler output into a session and it can be fixed quickly.
