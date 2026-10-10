@@ -88,7 +88,7 @@ Vec3 shade(const Vec3& normal, const Vec3& toEye, const Vec3& position, const Co
                      std::max(0.0f, (dot(n, light.fill) + 0.5f) / 1.5f) * 0.25f;
         float through = std::pow(std::max(0.0f, dot(-n, light.key)), 2.0f) * 0.6f +
                         std::pow(1.0f - std::max(0.0f, dot(n, toEye)), 2.0f) * 0.35f;
-        Vec3 wet = fleshBase * (ambient + wrap) + Vec3{0.45f, 0.06f, 0.20f} * (through * 0.5f);
+        Vec3 wet = fleshBase * (ambient + wrap) + Vec3{0.45f, 0.06f, 0.20f} * (through * 0.25f);
         wet += Vec3{1.0f, 0.95f, 1.0f} * (0.5f * std::pow(std::max(0.0f, dot(n, h)), 90.0f) * 2.4f);
         colour = lerp(colour, wet, soft);
     }

@@ -86,6 +86,35 @@ claws ringed, sacs and orbs lumpy (**roughness**, 0 for smooth).
 | Bridges | Across gaps between surfaces that face each other | Sagging catenary tendrils, thinner in the middle; rejected if they would pass through the host. |
 | Membranes | Some bridges | A sagging, two-sided sheet between two neighbouring bridges, torn through with noise-shaped holes whose rims glow. |
 
+### Formations
+
+Large set pieces, off by default and turned on by the presets below (or one
+by one: `--spires --ribcages --pods --shelves`, or the panel's Formations).
+
+| Formation | Where | What |
+|---|---|---|
+| Spires | Floors and ledges, under open air | Columns of twisted roots rising high, splaying into a clawed crown, a glowing core showing between the strands. |
+| Ribcages | Floors | A buried spine of vertebrae with paired ribs arching up over it, pale toward their tips: the remains of something consumed. |
+| Pods | Floors and walls | Egg cocoons, translucent, a shape glowing faintly inside, roots wound around them. |
+| Shelves | Walls | Overlapping bracket-fungus plates, thick at the wall and thin at a wavy rim, with faintly glowing gills beneath. |
+
+### Presets
+
+Named looks that set what grows and how, keeping the seed, coverage, gravity,
+plate size and feature scale (`--preset NAME`, or the panel's Preset).
+
+| Preset | Look |
+|---|---|
+| Eclipse | The default: carapace, roots, horns, hearts and maws. |
+| Creep | Early infestation: veins and roots feeling far ahead under a long halo; no hearts, little else. |
+| Thornfield | A bed of scythe horns with barbs; few roots, no sacs. |
+| Rootmass | Thick, knotted, branching roots over everything; heavy fusion. |
+| Hive | A nest: sac clusters, eyes, pods, shelves, membranes and slime everywhere. |
+| Carcass | Ribcages and bone, long hanging strands, heavily bruised flesh. |
+| Cathedral | Set pieces for a room: spires, ribcages, shelves, pods and great maws. |
+
+![The presets on the corridor](docs/previews/presets.jpg)
+
 See [docs/visual-language.md](docs/visual-language.md) for how the reference
 creatures map onto these generators, and [docs/roadmap.md](docs/roadmap.md) for
 what comes next.

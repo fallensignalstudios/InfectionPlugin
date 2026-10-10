@@ -69,6 +69,18 @@ rather than exceed **Max Vertices**.
 Vertices that are split along UV or smoothing seams are welded first, so the
 spread crosses those seams. Generated meshes have Nanite enabled by default.
 
+**Preset** (at the top of the panel) picks a starting look: Eclipse, Creep,
+Thornfield, Rootmass, Hive, Carcass or Cathedral (see the README). Choosing one
+rewrites the settings below it to match, ready to tweak; seed, coverage,
+gravity, plate size and feature scale are kept. Values the panel does not show,
+such as spacings and cluster sizes, also come from the preset. From Python or
+Blueprint, set `Preset` on the settings and call `ApplyPreset`.
+
+**Formations** adds large set pieces: **Spires** (twisted columns on floors),
+**Ribcages** (arching bone on floors), **Pods** (glowing egg cocoons) and
+**Shelves** (bracket fungus on walls), each with its size. Use them on
+environment meshes at Feature Scale 2 or more.
+
 **Bruising** and **Halo Reach** (Colour) set how mottled the carapace is and
 how far ahead of the front clean tissue darkens and grows capillaries; 0 turns
 the halo off. **Slime** and **Slime Chance** control the mucus strings.
@@ -232,7 +244,7 @@ Editor, Game Development and Game Shipping builds have passed with precompiled
 headers and unity builds disabled (`-NoPCH -NoSharedPCH -DisableUnity`, the
 flags used by `BuildPlugin -StrictIncludes`), with the 35 standalone tests and
 six Unreal automation tests passing, as of the live-spread fixes. The realism
-pass adds standalone tests (49 now) and a materials automation test; its
+pass adds standalone tests (51 now) and a materials automation test; its
 engine side awaits the same build. Run all Unreal tests with
 `Automation RunTests Infection`: they check skeletal corruption-channel bytes,
 skeletal regeneration after host changes, sparse-map queries, and live-spread

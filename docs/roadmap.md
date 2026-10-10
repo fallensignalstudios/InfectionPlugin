@@ -76,6 +76,11 @@ Next on characters: strands that swing (physics or AnimDynamics), carrying morph
 - **Nanite displacement** (opt-in): the carapace detail pushed out into geometry by tessellation.
 - The preview renderer now actually shows soft tissue, tone and the halo (it had been dropping those attributes).
 
+## Formations and presets
+
+- **Formations**: spires, ribcages, pods and shelf fungus, large set pieces placed before the smaller growths so those keep out of their space.
+- **Presets**: Eclipse, Creep, Thornfield, Rootmass, Hive, Carcass, Cathedral; in the CLI (`--preset`) and the panel (a dropdown that rewrites the look settings).
+
 ## Later
 
 - Strands that swing (physics or AnimDynamics) on characters.

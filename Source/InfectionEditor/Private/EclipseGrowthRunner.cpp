@@ -24,6 +24,7 @@
 
 #include "eclipse/corruption.h"
 #include "eclipse/growths.h"
+#include "eclipse/presets.h"
 #include "eclipse/mesh.h"
 #include "eclipse/skin.h"
 
@@ -87,9 +88,18 @@ namespace
 		return Hosts;
 	}
 
+	// The preset's full set of values, before the panel's own settings are
+	// laid over them: it also supplies those the panel does not show.
+	void PresetBaseline(const UEclipseGrowthSettings& S, eclipse::GrowthParams& P, eclipse::FeatureParams& F)
+	{
+		eclipse::applyPreset(static_cast<eclipse::Preset>(S.Preset), P, F);
+	}
+
 	eclipse::GrowthParams ToGrowthParams(const UEclipseGrowthSettings& S)
 	{
 		eclipse::GrowthParams P;
+		eclipse::FeatureParams Unused;
+		PresetBaseline(S, P, Unused);
 		P.seed = static_cast<uint32_t>(S.Seed);
 		P.coverage = S.Coverage;
 		P.gravity = S.Gravity;
@@ -108,7 +118,9 @@ namespace
 
 	eclipse::FeatureParams ToFeatureParams(const UEclipseGrowthSettings& S)
 	{
+		eclipse::GrowthParams Unused;
 		eclipse::FeatureParams F;
+		PresetBaseline(S, Unused, F);
 		F.enabled = S.bGrowths;
 		F.scale = S.FeatureScale;
 		F.veinTubes = S.bVeinTubes;
@@ -134,6 +146,14 @@ namespace
 		F.slimeChance = S.SlimeChance;
 		F.sacs = S.bSacs;
 		F.sacChance = S.SacChance;
+		F.spires = S.bSpires;
+		F.spireHeight = S.SpireHeight * 0.01f;
+		F.ribcages = S.bRibcages;
+		F.ribcageLength = S.RibcageLength * 0.01f;
+		F.pods = S.bPods;
+		F.podSize = S.PodSize * 0.01f;
+		F.shelves = S.bShelves;
+		F.shelfSize = S.ShelfSize * 0.01f;
 		return F;
 	}
 

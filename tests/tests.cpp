@@ -22,6 +22,7 @@
 #include "eclipse/geometry.h"
 #include "eclipse/growths.h"
 #include "eclipse/hosts.h"
+#include "eclipse/presets.h"
 #include "eclipse/preview.h"
 #include "eclipse/random.h"
 #include "eclipse/sdf.h"
@@ -741,6 +742,119 @@ TEST(slime_hangs_wet_and_clear_of_the_host) {
     // Slime lives in the soft-tissue mesh and changes nothing else.
     CHECK(g.flesh.vertexCount() > without.flesh.vertexCount());
     CHECK(meshHash(g.growths) == meshHash(without.growths));
+}
+
+// A flat 1.6 m floor, or a wall facing +z, for the formations.
+Mesh testPlane(bool wall) {
+    Mesh m;
+    const int n = 120;
+    const float size = 1.6f;
+    for (int j = 0; j <= n; ++j)
+        for (int i = 0; i <= n; ++i) {
+            float u = -size / 2 + size * static_cast<float>(i) / n, v = size * static_cast<float>(j) / n;
+            m.positions.push_back(wall ? Vec3{u, v, 0.0f} : Vec3{u, 0.0f, v - size / 2});
+        }
+    for (int j = 0; j < n; ++j)
+        for (int i = 0; i < n; ++i) {
+            uint32_t a = static_cast<uint32_t>(j * (n + 1) + i), b = a + 1, c = a + n + 1, d = c + 1;
+            if (wall) {
+                m.triangles.push_back({a, b, c});
+                m.triangles.push_back({b, d, c});
+            } else {
+                m.triangles.push_back({a, c, b});
+                m.triangles.push_back({b, c, d});
+            }
+        }
+    m.computeNormals();
+    return m;
+}
+
+FeatureParams formationsOnly() {
+    FeatureParams f;
+    f.veinTubes = f.tendrils = f.hearts = f.vertebrae = f.sacs = f.slime = false;
+    f.spikeSpacing = 10.0f;
+    f.noduleChance = 0.0f;
+    f.strandSpacing = 10.0f;
+    f.bridgeChance = 0.0f;
+    return f;
+}
+
+TEST(formations_rise_from_the_corruption) {
+    GrowthParams p;
+    p.coverage = 0.9f;
+    Mesh floor = testPlane(false), wall = testPlane(true);
+    struct Case {
+        const char* name;
+        bool FeatureParams::*flag;
+        size_t GrowthStats::*count;
+        bool onWall;
+    };
+    const Case cases[] = {{"spires", &FeatureParams::spires, &GrowthStats::spires, false},
+                          {"ribcages", &FeatureParams::ribcages, &GrowthStats::ribcages, false},
+                          {"pods", &FeatureParams::pods, &GrowthStats::pods, false},
+                          {"shelves", &FeatureParams::shelves, &GrowthStats::shelves, true}};
+    for (const Case& k : cases) {
+        FeatureParams f = formationsOnly();
+        f.ribcageSpacing = f.spireSpacing = 0.5f;
+        f.*k.flag = true;
+        const Mesh& host = k.onWall ? wall : floor;
+        Vec3 seed = k.onWall ? Vec3{0, 0.8f, 0} : Vec3{0, 0, 0};
+        Growth g = grow(host, {seed}, p, f);
+        bool grew = g.stats.*k.count > 0;
+        if (!grew) std::printf("    no %s grew\n", k.name);
+        CHECK(grew);
+        // Out in the open, in front of the surface they grew from (allowing
+        // for the part buried in the tissue).
+        bool front = true, finite = true;
+        for (const Mesh* m : {&g.growths, &g.flesh})
+            for (const Vec3& q : m->positions) {
+                float height = k.onWall ? q.z : q.y;
+                front = front && height > -0.08f;
+                finite = finite && std::isfinite(q.x) && std::isfinite(q.y) && std::isfinite(q.z);
+            }
+        if (!front) {
+            float lowest = 0.0f;
+            for (const Mesh* m : {&g.growths, &g.flesh})
+                for (const Vec3& q : m->positions) lowest = std::min(lowest, k.onWall ? q.z : q.y);
+            std::printf("    %s reaches %.3f m behind its surface\n", k.name, lowest);
+        }
+        CHECK(front);
+        CHECK(finite);
+    }
+    // Off by default.
+    Growth plain = grow(floor, {{0, 0, 0}}, p, FeatureParams{});
+    CHECK(plain.stats.spires + plain.stats.ribcages + plain.stats.pods + plain.stats.shelves == 0);
+}
+
+TEST(presets_name_and_shape_the_look) {
+    std::vector<std::string> names = presetNames();
+    CHECK(names.size() == 7);
+    for (size_t i = 0; i < names.size(); ++i) {
+        Preset preset;
+        CHECK(presetFromName(names[i], preset) && static_cast<size_t>(preset) == i);
+    }
+    Preset upper;
+    CHECK(presetFromName("Cathedral", upper) && upper == Preset::Cathedral);
+    Preset none;
+    CHECK(!presetFromName("nonsense", none));
+
+    // Framing survives; the look does not.
+    GrowthParams p;
+    p.seed = 9;
+    p.coverage = 0.3f;
+    p.plateSize = 0.18f;
+    p.veinReach = 0.9f;
+    FeatureParams f;
+    f.scale = 2.0f;
+    f.spikeSpacing = 1.0f;
+    applyPreset(Preset::Thornfield, p, f);
+    CHECK(p.seed == 9 && p.coverage == 0.3f && p.plateSize == 0.18f && f.scale == 2.0f);
+    CHECK(p.veinReach == GrowthParams{}.veinReach);
+    CHECK(f.spikeSpacing < FeatureParams{}.spikeSpacing && f.spikeBarbs > FeatureParams{}.spikeBarbs);
+    applyPreset(Preset::Eclipse, p, f);
+    CHECK(f.spikeSpacing == FeatureParams{}.spikeSpacing && !f.spires);
+    applyPreset(Preset::Cathedral, p, f);
+    CHECK(f.spires && f.ribcages && f.shelves);
 }
 
 TEST(soft_tissue_is_its_own_mesh) {
