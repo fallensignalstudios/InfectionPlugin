@@ -54,9 +54,7 @@ tool's own software renderer, so a growth can be judged without opening the
 engine. `--help` lists every option. `--no-growths` keeps only the corrupted
 surface; `--feature-scale` sizes the growths (the corridor defaults to 2).
 
-| | |
-|---|---|
-| ![Test human at 85%](docs/previews/mannequin_c085_detail.jpg) | ![Corridor corner at 60%](docs/previews/corridor_c060_growths.jpg) |
+![A corridor corner at four stages](docs/previews/corridor_stages.jpg)
 
 ## How it grows
 
@@ -72,8 +70,11 @@ a seed) carries more and larger growths than the advancing front.
 
 | Growth | Where | How |
 |---|---|---|
-| Vein tubes | Along every vein thick enough to see | Parallel-transport tubes swept along the smoothed vein curves, half sunk into the tissue; hidden beneath carapace, exposed on clean skin. |
-| Thorns | Sharpest ridges and plate crests | Curved, tapering horns leaning along the direction of growth. |
+| Vein tubes | Along every vein thick enough to see | Dark raised roots swept along the smoothed vein curves; a few stretches glow from within. |
+| Roots | Over the whole corruption | Ropes walked over the surface along the spread's own paths in toward the cores, thickening as they go and turned off-line so they spiral around limbs and columns. |
+| Hearts | At each seed | A glowing orb gripped by a ring of claws; at high coverage a second, wider ring opens it into a maw. Never larger than the curve of the body part it sits on. |
+| Vertebrae | Along the thickest vein trunks | Segmented ridges, like a spine under the skin. |
+| Horns | Oldest tissue, near the cores | Scythes swept along the growth: most modest, a rare few several times longer. |
 | Eyes and sacs | Flatter hollows inside plates | Half-buried ellipsoids: eyes with a bright pupil ringed by a dark lid, or sacs glowing toward the crown. |
 | Hanging strands | Undersides and overhangs | Gravity-drooping, swaying tubes ending in a drip; some glow. A strand stops where it would sink back into the host. |
 | Bridges | Across gaps between surfaces that face each other | Sagging catenary tendrils, thinner in the middle; rejected if they would pass through the host. |

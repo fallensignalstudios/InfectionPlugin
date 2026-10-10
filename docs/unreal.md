@@ -40,6 +40,13 @@ and `<Host> Eclipse_Growths`, and replaced each time you grow again. Their
 meshes are written to `<Output Folder>/Generated` and are unsaved until you
 **Save All**. Undo removes the placed actors; the generated assets stay until you delete them.
 
+### If an earlier version was used
+
+The panel remembers its settings, so values from before the art pass (plate
+thickness, stretch, seam glow) stay as they were. Right-click the panel's
+categories and **Reset to Default** to pick up the new look, and press
+**Rebuild Materials** once for the darker inflamed colour.
+
 ### Output modes
 
 - **Overlay** (default): only the corrupted part of the surface is generated,

@@ -442,10 +442,11 @@ SurfaceGrowth growSurface(const Mesh& hostIn, const std::vector<Vec3>& seeds, co
         if (spread.threshold > 0.0f && params.coreRadius > 0.0f)
             core = 1.0f - smoothstep(0.0f, params.coreRadius, spread.distance[v]);
 
-        a.infection = inf;
+        a.infection = std::max(inf, smoothstep(0.0f, 0.6f, vein));
         a.crack = crack;
-        // Veins on still-clean tissue glow dimmer than those inside the corruption.
-        a.glow = std::max({vein * (1.0f - 0.85f * armour) * lerpf(0.55f, 1.0f, inf), crackLight * 0.9f, core});
+        // Veins stain the tissue dark and glow only faintly; light belongs to
+        // the cores, the eyes and the seams that leak it.
+        a.glow = std::max({vein * (1.0f - 0.85f * armour) * 0.05f, crackLight * 0.6f, core});
         a.height = height;
         a.arrival = spread.threshold > 0.0f && spread.distance[v] < kInf
                         ? std::min(4.0f, spread.distance[v] / spread.threshold)

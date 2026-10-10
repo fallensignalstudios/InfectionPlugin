@@ -116,6 +116,13 @@ namespace
 		F.bridgeMaxGap = S.BridgeMaxGap * 0.01f;
 		F.membraneChance = S.MembraneChance;
 		F.membraneHoles = S.MembraneHoles;
+		F.tendrils = S.bRoots;
+		F.tendrilDensity = S.RootDensity;
+		F.tendrilLength = S.RootLength * 0.01f;
+		F.hearts = S.bHearts;
+		F.heartRadius = S.HeartSize * 0.01f;
+		F.mawCoverage = S.MawCoverage;
+		F.vertebrae = S.bVertebrae;
 		return F;
 	}
 

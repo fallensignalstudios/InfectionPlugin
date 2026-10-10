@@ -32,10 +32,10 @@ struct GrowthParams {
 
     // Carapace -------------------------------------------------------------
     float plateSize = 0.085f;    // mean spacing between plate centres
-    float plateStretch = 2.5f;   // plates elongate along the spread into sinew strands
-    float plateThickness = 0.014f;
+    float plateStretch = 3.5f;   // plates elongate along the spread into sinew strands
+    float plateThickness = 0.009f;
     float seamWidth = 0.004f;    // half-width of the crack between plates
-    float seamGlow = 0.7f;       // how many seams leak light, 0..1
+    float seamGlow = 0.08f;      // how many seams leak light, 0..1
     float swell = 0.006f;        // general thickening of corrupted tissue
     float roughness = 0.0025f;   // amplitude of the knotted surface detail
 };

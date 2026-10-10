@@ -71,14 +71,14 @@ public:
 
 	// How far plates stretch along the direction of growth into sinew strands.
 	UPROPERTY(EditAnywhere, Config, Category = "Carapace", meta = (ClampMin = "1", ClampMax = "6"))
-	float PlateStretch = 2.5f;
+	float PlateStretch = 3.5f;
 
 	UPROPERTY(EditAnywhere, Config, Category = "Carapace", meta = (ClampMin = "0", ClampMax = "10", Units = "cm"))
-	float PlateThickness = 1.4f;
+	float PlateThickness = 0.9f;
 
 	// How many of the seams between plates leak light.
 	UPROPERTY(EditAnywhere, Config, Category = "Carapace", meta = (ClampMin = "0", ClampMax = "1"))
-	float SeamGlow = 0.7f;
+	float SeamGlow = 0.08f;
 
 	// --- Growths ------------------------------------------------------------
 
@@ -92,6 +92,32 @@ public:
 	UPROPERTY(EditAnywhere, Config, Category = "Growths", meta = (EditCondition = "bGrowths"))
 	bool bVeinTubes = true;
 
+	// Ropes laid over the surface that run in toward the cores, spiralling around what they climb.
+	UPROPERTY(EditAnywhere, Config, Category = "Growths", meta = (EditCondition = "bGrowths"))
+	bool bRoots = true;
+
+	UPROPERTY(EditAnywhere, Config, Category = "Growths", meta = (ClampMin = "0", ClampMax = "1", EditCondition = "bGrowths && bRoots"))
+	float RootDensity = 0.7f;
+
+	UPROPERTY(EditAnywhere, Config, Category = "Growths", meta = (ClampMin = "1", ClampMax = "300", Units = "cm", EditCondition = "bGrowths && bRoots"))
+	float RootLength = 30.0f;
+
+	// A glowing orb gripped by claws at each seed.
+	UPROPERTY(EditAnywhere, Config, Category = "Growths", meta = (EditCondition = "bGrowths"))
+	bool bHearts = true;
+
+	UPROPERTY(EditAnywhere, Config, Category = "Growths", meta = (ClampMin = "1", ClampMax = "200", Units = "cm", EditCondition = "bGrowths && bHearts"))
+	float HeartSize = 7.0f;
+
+	// Above this coverage a heart opens into a maw with a second ring of claws.
+	UPROPERTY(EditAnywhere, Config, Category = "Growths", meta = (ClampMin = "0", ClampMax = "1.01", EditCondition = "bGrowths && bHearts"))
+	float MawCoverage = 0.7f;
+
+	// Segmented ridges along the thickest vein trunks.
+	UPROPERTY(EditAnywhere, Config, Category = "Growths", meta = (EditCondition = "bGrowths"))
+	bool bVertebrae = true;
+
+	// A typical horn; a rare few grow several times longer.
 	UPROPERTY(EditAnywhere, Config, Category = "Growths", meta = (ClampMin = "0", ClampMax = "50", Units = "cm", EditCondition = "bGrowths"))
 	float ThornLength = 7.5f;
 
