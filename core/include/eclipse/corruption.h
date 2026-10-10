@@ -51,6 +51,7 @@ struct SpreadField {
 // One unbranched run of vein between junctions, leaves or a seed, smoothed
 // off the mesh's vertex grid. Ordered from the far end toward the seed.
 struct VeinPath {
+    std::vector<uint32_t> vertices;  // host vertex each point started from
     std::vector<Vec3> points;
     std::vector<Vec3> normals;      // surface normal under each point
     std::vector<float> radius;
@@ -81,9 +82,18 @@ VeinNetwork computeVeins(const Mesh& host, const SpreadField& spread,
 PlateLayout computePlates(const Mesh& host, const VertexGraph& graph, const SpreadField& spread,
                           const GrowthParams& params);
 
-// Runs every stage and returns the corrupted copy of the host: displaced
-// positions, fresh normals and per-vertex corruption attributes. The input
-// must carry normals.
+// The corrupted copy of the host (displaced positions, fresh normals and
+// per-vertex corruption attributes) with the fields that produced it.
+struct SurfaceGrowth {
+    Mesh surface;
+    SpreadField spread;
+    VeinNetwork veins;
+    PlateLayout plates;
+};
+
+SurfaceGrowth growSurface(const Mesh& host, const std::vector<Vec3>& seeds, const GrowthParams& params);
+
+// Just the corrupted surface; see growSurface.
 Mesh corrupt(const Mesh& host, const std::vector<Vec3>& seeds, const GrowthParams& params);
 
 // Stable fingerprint of a mesh's geometry and attributes, for regression tests.

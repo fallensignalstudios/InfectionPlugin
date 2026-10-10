@@ -10,14 +10,21 @@
 - Built-in test hosts (mannequin, corridor) and a software look-dev renderer.
 - Deterministic and compiler-independent; tests cover each stage.
 
-## Phase 2: growths (geometry added on top of the surface)
+## Phase 2: growths (done)
 
-- **Vein tubes**: the vein curves as real geometry, so veins stay crisp at any mesh density.
-- **Spikes and thorns** on ridges and crests, oriented along the ridge.
-- **Nodules and eyes** in hollows, with emissive cores.
-- **Hanging strands and drips**: gravity-relaxed curves from overhangs, and catenary bridges across gaps.
-- **Membranes** stretched across concave gaps (armpits, corners, doorways), perforated with holes.
-- **Late-stage fraying** of the silhouette.
+- **Vein tubes** along the vein curves, crisp at any mesh density.
+- **Thorns** on ridges and plate crests, curved along the growth direction.
+- **Eyes and sacs** in hollows, with emissive pupils or crowns.
+- **Hanging strands and drips** from overhangs.
+- **Bridges**: sagging tendrils across gaps between facing surfaces.
+- **Torn membranes** between neighbouring bridges, two-sided, with glowing hole rims.
+- Growth density and size scale with tissue age, so the oldest corruption is the most overgrown.
+- Surface and growths export as separate meshes in one `.glb`.
+
+Not yet: the full late-stage **shredding of the silhouette** (the wraith reference),
+where the host's own outline tears into hanging fringe. The strands thicken
+toward that look at high coverage, but tearing the host surface itself is a
+later step.
 
 ## Phase 3: Unreal Engine 5.8 plugin
 

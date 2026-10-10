@@ -207,6 +207,7 @@ VeinNetwork computeVeins(const Mesh& host, const SpreadField& spread,
         if (up < 0 || !isVein[up]) continue;
         VeinPath path;
         auto push = [&](uint32_t u) {
+            path.vertices.push_back(u);
             path.points.push_back(host.positions[u]);
             path.normals.push_back(host.normals[u]);
             path.radius.push_back(centreRadius[u]);
@@ -389,15 +390,21 @@ PlateLayout computePlates(const Mesh& host, const VertexGraph& graph, const Spre
     return layout;
 }
 
-Mesh corrupt(const Mesh& host, const std::vector<Vec3>& seeds, const GrowthParams& params) {
-    Mesh out = host;
-    if (out.normals.size() != out.positions.size()) out.computeNormals();
+SurfaceGrowth growSurface(const Mesh& hostIn, const std::vector<Vec3>& seeds, const GrowthParams& params) {
+    SurfaceGrowth result;
+    Mesh host = hostIn;
+    if (host.normals.size() != host.positions.size()) host.computeNormals();
+    Mesh& out = result.surface;
+    out = host;
     const size_t n = out.positions.size();
     VertexGraph graph = VertexGraph::build(out);
 
-    SpreadField spread = computeSpread(out, graph, seeds, params);
-    VeinNetwork veins = computeVeins(out, spread, params);
-    PlateLayout plates = computePlates(out, graph, spread, params);
+    result.spread = computeSpread(out, graph, seeds, params);
+    result.veins = computeVeins(out, result.spread, params);
+    result.plates = computePlates(out, graph, result.spread, params);
+    const SpreadField& spread = result.spread;
+    const VeinNetwork& veins = result.veins;
+    const PlateLayout& plates = result.plates;
 
     Noise swellNoise(params.seed * 13u + 3u);
     Noise knots(params.seed * 101u + 7u);
@@ -436,7 +443,8 @@ Mesh corrupt(const Mesh& host, const std::vector<Vec3>& seeds, const GrowthParam
 
         a.infection = inf;
         a.crack = crack;
-        a.glow = std::max({vein * (1.0f - 0.85f * armour), crackLight * 0.9f, core});
+        // Veins on still-clean tissue glow dimmer than those inside the corruption.
+        a.glow = std::max({vein * (1.0f - 0.85f * armour) * lerpf(0.55f, 1.0f, inf), crackLight * 0.9f, core});
         a.height = height;
         a.arrival = spread.threshold > 0.0f && spread.distance[v] < kInf
                         ? std::min(4.0f, spread.distance[v] / spread.threshold)
@@ -444,7 +452,11 @@ Mesh corrupt(const Mesh& host, const std::vector<Vec3>& seeds, const GrowthParam
         out.positions[v] = host.positions[v] + host.normals[v] * height;
     }
     out.computeNormals();
-    return out;
+    return result;
+}
+
+Mesh corrupt(const Mesh& host, const std::vector<Vec3>& seeds, const GrowthParams& params) {
+    return growSurface(host, seeds, params).surface;
 }
 
 uint64_t meshHash(const Mesh& mesh) {

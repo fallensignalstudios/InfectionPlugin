@@ -29,11 +29,14 @@ endfunction()
 add_library(eclipse_core STATIC
   core/src/corruption.cpp
   core/src/export.cpp
+  core/src/geometry.cpp
+  core/src/growths.cpp
   core/src/hosts.cpp
   core/src/mesh.cpp
   core/src/noise.cpp
   core/src/preview.cpp
   core/src/sdf.cpp
+  core/src/spatial.cpp
 )
 target_include_directories(eclipse_core PUBLIC core/include)
 eclipse_warnings(eclipse_core)

@@ -19,11 +19,11 @@ What the reference creatures share, and which generator is responsible for each 
 | Violet light in cracks and seams, but not every seam | Seam leak mask | Done |
 | Branching glowing veins, brightest at a core | Flow-accumulation veins, seed core glow | Done |
 | Veins running ahead into clean tissue | Vein reach past the front | Done |
-| Spikes and thorns on ridges, shoulders and crests | Spikes on high convexity, aligned to the ridge | Phase 2 |
-| Glowing nodules and eyes in hollows | Nodule scatter in concave regions, emissive core | Phase 2 |
-| Strands hanging under gravity, drips | Hanging strands and catenary bridges | Phase 2 |
-| Torn membranes with holes | Membranes stretched across gaps, with cut-out holes | Phase 2 |
-| Fraying silhouette at late stage | Strand fringe on silhouette edges | Phase 2 |
+| Spikes and thorns on ridges, shoulders and crests | Thorns on the most convex plate crests, leaning along the growth | Done |
+| Glowing nodules and eyes in hollows | Eyes and sacs in flatter plate hollows, emissive pupils | Done |
+| Strands hanging under gravity, drips | Hanging strands with drips, and catenary bridges | Done |
+| Torn membranes with holes | Two-sided membranes between bridges, noise-torn, glowing rims | Done |
+| Fraying silhouette at late stage | Denser, longer strands on old tissue; tearing the host outline itself | Partly |
 | Wet sheen, pulse, subsurface light | Unreal master material | Phase 3 |
 
 ## Palette
