@@ -28,7 +28,7 @@ Vec3 shade(const Vec3& normal, const Vec3& toEye, const CorruptionAttributes& a,
     Vec3 skin{0.50f, 0.43f, 0.41f};
     Vec3 carapace = Vec3{0.018f, 0.015f, 0.022f} + Vec3{0.02f, 0.008f, 0.03f} * a.plateTint;
     Vec3 base = lerp(skin, carapace, s);
-    base = lerp(base, Vec3{0.32f, 0.10f, 0.24f}, 0.55f * inflamed * (1.0f - s));
+    base = lerp(base, Vec3{0.12f, 0.05f, 0.10f}, 0.45f * inflamed * (1.0f - s));
 
     float ambient = lerpf(0.20f, 0.36f, n.y * 0.5f + 0.5f);
     float diffuse = std::max(0.0f, dot(n, light.key)) * 0.9f + std::max(0.0f, dot(n, light.fill)) * 0.25f;
@@ -43,7 +43,7 @@ Vec3 shade(const Vec3& normal, const Vec3& toEye, const CorruptionAttributes& a,
     colour += Vec3{1.0f, 0.97f, 1.0f} * spec;
 
     float fresnel = std::pow(1.0f - std::max(0.0f, dot(n, toEye)), 4.0f);
-    colour += Vec3{0.55f, 0.42f, 0.75f} * fresnel * (0.04f + 0.45f * s);
+    colour += Vec3{0.55f, 0.55f, 0.6f} * fresnel * (0.04f + 0.3f * s);
 
     float g = clamp01(a.glow);
     colour += Vec3{0.55f, 0.14f, 1.0f} * (g * 2.0f);

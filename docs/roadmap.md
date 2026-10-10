@@ -52,9 +52,15 @@ Next on characters: strands that swing (physics or AnimDynamics), carrying morph
 - The component plays the spread forward or back at any speed with events at either end, cuts the corruption back with up to four burn spheres that smoulder at the edge, and answers "how infected is this spot now?" for gameplay.
 - The material gains burn spheres (distance taken by the engine's large-world-safe Distance node) and an ember glow.
 
+## Art pass: toward the designer's corridor
+
+- Roots, hearts and maws, vertebrae and long-tailed scythe horns; dark raised veins; glow kept to cores, eyes and a few seams.
+- Defaults retuned to match (flatter, longer plates; quieter seams; a dark bruise at the front instead of magenta).
+
 ## Later
 
 - Strands that swing (physics or AnimDynamics) on characters.
 - Seeding new outbreaks at runtime, growing on the fly where the player is.
 - Permanent, unlimited burn scars (a render-target mask instead of four spheres).
 - Tearing the host silhouette at late stage.
+- Cutting into the host: a portal or burrow carved into a wall, not only grown onto it.

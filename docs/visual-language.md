@@ -31,3 +31,25 @@ What the reference creatures share, and which generator is responsible for each 
 - Carapace: near-black with a violet cast, linear about (0.02, 0.015, 0.025), clear-coat gloss.
 - Glow: saturated violet, linear about (0.55, 0.15, 1.0), white-hot at the core.
 - Host tissue at the front: inflamed, desaturated magenta before it blackens.
+
+## Art direction: the designer's corridor
+
+![The designer's target, four stages](reference/designer_corridor_stages.jpg)
+
+What the target asks for, and how the generator answers it:
+
+| Target | Generator |
+|---|---|
+| Dark, raised, root-like veins; violet only in cracks and cores | Vein tubes are thick and black with rare lit fissures; painted veins stain the tissue dark instead of glowing |
+| Dense ropy tangle climbing everything, wrapping the column | Roots: ropes traced over the surface toward the cores, with a twist |
+| A few huge scythe horns among smaller ones | Horns with a long-tailed size, gathered on the oldest tissue |
+| Glowing cores with tendrils radiating from them | Hearts at the seeds; roots converge on them |
+| Spine-like ridges on the floor | Vertebrae along the trunks |
+| Mostly black, glow as accent | Seams barely leak light, membranes and strands are unlit, the inflamed front is a dark bruise |
+| A maw in the final frame | The heart's second ring of claws at high coverage |
+
+![Our corridor at the same four stages](previews/corridor_stages.jpg)
+
+Not there yet: the final frame's portal is a tunnel carved into the wall; ours
+is a claw ring over a sunken orb, since the generator adds geometry but does
+not cut into the host. The column wrapping is looser than the target's.

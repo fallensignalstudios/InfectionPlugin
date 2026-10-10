@@ -192,10 +192,10 @@ int main(int argc, char** argv) {
         if (obj) writeObj(base + ".obj", grown);
         std::printf("  coverage %.2f -> %s.glb (hash %016llx)\n", p.coverage, base.c_str(),
                     static_cast<unsigned long long>(meshHash(grown)));
-        std::printf("    %zu vein tubes, %zu spikes, %zu nodules, %zu strands, %zu bridges, %zu membranes; "
-                    "%zu growth triangles\n",
-                    g.stats.veinTubes, g.stats.spikes, g.stats.nodules, g.stats.strands, g.stats.bridges,
-                    g.stats.membranes, g.growths.triangleCount());
+        std::printf("    %zu roots, %zu vein tubes, %zu horns, %zu hearts, %zu vertebrae, %zu nodules, %zu strands, "
+                    "%zu bridges, %zu membranes; %zu growth triangles\n",
+                    g.stats.tendrils, g.stats.veinTubes, g.stats.spikes, g.stats.hearts, g.stats.vertebrae,
+                    g.stats.nodules, g.stats.strands, g.stats.bridges, g.stats.membranes, g.growths.triangleCount());
         if (preview) {
             PreviewOptions opts;
             if (stages.size() > 1) {

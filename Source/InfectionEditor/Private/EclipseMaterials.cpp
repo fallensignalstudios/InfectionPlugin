@@ -44,7 +44,7 @@ namespace
 	const TCHAR* BaseColorCode = TEXT(
 		"float inflamed = 4.0 * s * (1.0 - s);\n"
 		"float3 host = lerp(HostColor, InflamedColor, OverlayMode);\n"
-		"float3 c = lerp(host, InflamedColor, 0.55 * inflamed * (1.0 - s));\n"
+		"float3 c = lerp(host, InflamedColor, 0.45 * inflamed * (1.0 - s));\n"
 		"return lerp(c, CarapaceColor + CarapaceTint * VA, s);\n");
 
 	// The glow pulses in waves travelling outward from the seed.
@@ -169,7 +169,7 @@ namespace
 		auto* CoatRoughness = Scalar(M, TEXT("ClearCoatRoughness"), 0.06f, 180);
 
 		auto* HostColor = Colour(M, TEXT("HostColor"), FLinearColor(0.50f, 0.43f, 0.41f), -700);
-		auto* InflamedColor = Colour(M, TEXT("InflamedColor"), FLinearColor(0.32f, 0.10f, 0.24f), -560);
+		auto* InflamedColor = Colour(M, TEXT("InflamedColor"), FLinearColor(0.12f, 0.05f, 0.10f), -560);
 		auto* CarapaceColor = Colour(M, TEXT("CarapaceColor"), FLinearColor(0.018f, 0.015f, 0.022f), -420);
 		auto* CarapaceTint = Colour(M, TEXT("CarapaceTint"), FLinearColor(0.02f, 0.008f, 0.03f), -280);
 		auto* GlowColor = Colour(M, TEXT("GlowColor"), FLinearColor(0.55f, 0.14f, 1.0f), -140);
