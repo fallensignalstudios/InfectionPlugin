@@ -55,9 +55,20 @@ namespace
 			{
 				continue;
 			}
-			// A character's skeletal mesh takes precedence over any props on it.
-			USkeletalMeshComponent* Skeletal = Actor->FindComponentByClass<USkeletalMeshComponent>();
-			if (Skeletal && Skeletal->GetSkeletalMeshAsset() && !Skeletal->IsA<UEclipseFollowerComponent>())
+			// A character's skeletal mesh takes precedence over any props on
+			// it. Our own followers are skeletal components too: skip them, or
+			// a second grow would mistake one for the host.
+			TInlineComponentArray<USkeletalMeshComponent*> SkeletalComponents(Actor);
+			USkeletalMeshComponent* Skeletal = nullptr;
+			for (USkeletalMeshComponent* Candidate : SkeletalComponents)
+			{
+				if (Candidate->GetSkeletalMeshAsset() && !Candidate->IsA<UEclipseFollowerComponent>())
+				{
+					Skeletal = Candidate;
+					break;
+				}
+			}
+			if (Skeletal)
 			{
 				Hosts.Add({Actor, Skeletal, nullptr, Skeletal});
 				continue;
@@ -301,6 +312,11 @@ namespace EclipseGrowthRunner
 				const FString Generated = Folder / TEXT("Generated");
 				if (bSkeletal)
 				{
+					if (MeshSkin.size() != Mesh.vertexCount())
+					{
+						Problems.Add(FString::Printf(TEXT("%s: bone weights did not line up with the generated mesh"), *Label));
+						return false;
+					}
 					EclipseBridge::BuildMeshDescription(Mesh, Source, /*bMeshLocal*/ true, Slot, Description, &MeshSkin);
 					USkeletalMesh* Asset = EclipseBridge::WriteSkeletalMesh(Host.Skeletal->GetSkeletalMeshAsset(), Generated,
 						Base + Suffix, MoveTemp(Description), Material, Slot, Error);

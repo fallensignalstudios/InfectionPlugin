@@ -208,6 +208,7 @@ namespace EclipseBridge
 
 		const bool bHasNormals = Mesh.normals.size() == Mesh.positions.size();
 		const bool bHasAttributes = Mesh.attributes.size() == Mesh.positions.size();
+		check(!Skin || Skin->size() == Mesh.positions.size());
 		// The mesh build stores colours as sRGB bytes and the material reads
 		// those bytes back raw, so hand it the linear value whose sRGB byte is
 		// the number we want the material to see.
@@ -383,6 +384,13 @@ namespace EclipseBridge
 			FLODUtilities::RemoveLOD(Context, Mesh->GetLODNum() - 1);
 		}
 		Mesh->UnregisterAllMorphTarget();
+		// Nothing inherited from the host may reshape the generated geometry.
+		Mesh->SetLODSettings(nullptr);
+		Mesh->GetSkinWeightProfiles().Empty();
+		// The corruption data lives in vertex colours; character meshes often
+		// have them switched off.
+		Mesh->SetHasVertexColors(true);
+		Mesh->SetVertexColorGuid(FGuid::NewGuid());
 
 		TArray<FSkeletalMaterial> Materials;
 		Materials.Add(FSkeletalMaterial(Material, SlotName, SlotName));
@@ -394,6 +402,22 @@ namespace EclipseBridge
 			LOD->BuildSettings.bRecomputeTangents = true;
 			LOD->BuildSettings.bUseMikkTSpace = true;
 			LOD->BuildSettings.bUseFullPrecisionUVs = true;  // UV 0 carries arrival times
+			LOD->ReductionSettings = FSkeletalMeshOptimizationSettings();  // never decimate LOD 0
+		}
+
+		// The skeleton, in the description too, as imported skeletal meshes
+		// carry it; bone indices are the asset's, as the weights expect.
+		{
+			FSkeletalMeshAttributes Attributes(Description);
+			const FReferenceSkeleton& Reference = Mesh->GetRefSkeleton();
+			const TArray<FTransform>& Pose = Reference.GetRefBonePose();
+			for (int32 Bone = 0; Bone < Reference.GetRawBoneNum(); ++Bone)
+			{
+				const FBoneID Id = Attributes.CreateBone();
+				Attributes.GetBoneNames().Set(Id, Reference.GetBoneName(Bone));
+				Attributes.GetBoneParentIndices().Set(Id, Reference.GetParentIndex(Bone));
+				Attributes.GetBonePoses().Set(Id, Pose[Bone]);
+			}
 		}
 
 		FMeshDescription* Target = Mesh->CreateMeshDescription(0);

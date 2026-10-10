@@ -84,6 +84,10 @@ Limits for now:
 - Growths are rigid with the bone that carries them: strands do not swing or
   hang with gravity as the character moves. Physics on strands is a later step.
 - The host's morph targets are not carried over to the corruption.
+- Growing places followers on level actors. On a character Blueprint whose
+  skeletal mesh is added in the Blueprint itself (not the inherited Mesh),
+  the construction script may rebuild that component and orphan the
+  followers; add the follower in the Blueprint instead, as above.
 
 ![A grown arm swung down through the transferred weights](previews/skinned_pose.jpg)
 
