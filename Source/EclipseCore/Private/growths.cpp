@@ -74,6 +74,17 @@ struct Context {
         return a;
     }
 
+    // A tube surface scaled by the roughness setting; `id` varies the noise.
+    TubeStyle style(float lumps, float lumpSize, float rings, float ringSpacing, uint32_t id) const {
+        TubeStyle t;
+        t.lumps = lumps * f.roughness;
+        t.lumpSize = std::max(1e-4f, lumpSize);
+        t.rings = rings * f.roughness;
+        t.ringSpacing = std::max(1e-4f, ringSpacing);
+        t.seed = hash32(id * 2654435761u + params.seed);
+        return t;
+    }
+
     void fuse(const Vec3& at, const Vec3& normal, float radius, float height, float hollow = 0.0f) {
         if (f.fusion > 0.0f && radius > 0.0f) anchors.push_back({at, normal, radius, height * f.fusion, hollow});
     }
@@ -119,7 +130,11 @@ void growVeinTubes(Context& c, const VeinNetwork& veins, Mesh& out, GrowthStats&
             if (i % 3 == 0) c.fuse(path.points[i], path.normals[i], r * 2.5f, r * 0.6f);
         }
         if (pts.size() < 2) continue;
-        appendTube(out, pts, radii, attrs, 7);
+        // Knotted, but no finer than the vein's own samples: there are
+        // thousands of these in a room.
+        appendTube(out, pts, radii, attrs, 7, true,
+                   c.style(0.18f, std::max(widest * 6.0f, 0.006f * c.f.scale * 3.0f), 0.0f, 1.0f,
+                           static_cast<uint32_t>(stats.veinTubes)));
         ++stats.veinTubes;
     }
 }
@@ -157,7 +172,9 @@ void growSpikes(Context& c, Rng& rng, Mesh& out, GrowthStats& stats) {
         // A scythe: up out of the tissue, then swept along the growth.
         Vec3 sweep = normalize(n * 0.3f + c.grain[v] * c.f.spikeSweep);
         Vec3 base = p - n * (r0 * 0.6f);
-        auto pts = sampleQuadratic(base, p + n * (len * 0.55f), p + n * (len * 0.25f) + sweep * len, 9);
+        const Vec3 control = p + n * (len * 0.55f), tip = p + n * (len * 0.25f) + sweep * len;
+        const bool big = len > 2.0f * c.f.spikeLength * c.f.scale;
+        auto pts = sampleQuadratic(base, control, tip, big ? 28 : 16);
         std::vector<float> radii;
         std::vector<CorruptionAttributes> attrs;
         for (size_t i = 0; i < pts.size(); ++i) {
@@ -167,9 +184,39 @@ void growSpikes(Context& c, Rng& rng, Mesh& out, GrowthStats& stats) {
             radii.push_back(i + 1 == pts.size() ? 0.0f : r0 * flare * std::pow(1.0f - t, 1.1f));
             attrs.push_back(c.attr(v, 0.0f));
         }
-        appendTube(out, pts, radii, attrs, 8);
+        // Growth rings near the base, like horn or keratin, and slight knots.
+        appendTube(out, pts, radii, attrs, big ? 12 : 8, true, c.style(0.06f, r0 * 1.5f, 0.08f, len * 0.05f, v));
         c.fuse(p, n, r0 * 3.2f, r0 * 0.9f);
         ++stats.spikes;
+
+        // Barbs: small hooked thorns along a big horn's outer curve, raked
+        // back toward its base.
+        if (!big || c.f.spikeBarbs <= 0) continue;
+        const Vec3 bend = normalize((pts.front() + pts.back()) * 0.5f - pts[pts.size() / 2]);  // the outer side
+        const int barbs = static_cast<int>(static_cast<float>(c.f.spikeBarbs) * rng.range(0.6f, 1.4f) + 0.5f);
+        for (int b = 0; b < barbs; ++b) {
+            float t = rng.range(0.25f, 0.8f);
+            size_t i = static_cast<size_t>(t * static_cast<float>(pts.size() - 1));
+            Vec3 along = normalize(pts[i + 1] - pts[i]);
+            Vec3 side = bend - along * dot(bend, along);
+            if (length(side) < 1e-4f) continue;
+            side = normalize(side);
+            float spin = rng.range(-0.8f, 0.8f);
+            side = normalize(side * std::cos(spin) + cross(along, side) * std::sin(spin));
+            float rb = radii[i] * rng.range(0.22f, 0.35f);
+            float lb = radii[i] * rng.range(1.4f, 2.6f);
+            Vec3 from = pts[i] + side * (radii[i] * 0.7f);
+            Vec3 to = from + normalize(side * 0.8f - along * 0.5f) * lb;
+            auto barb = sampleQuadratic(from, from + side * (lb * 0.6f), to, 5);
+            std::vector<float> br;
+            std::vector<CorruptionAttributes> ba;
+            for (size_t j = 0; j < barb.size(); ++j) {
+                br.push_back(j + 1 == barb.size() ? 0.0f : rb * (1.0f - static_cast<float>(j) / static_cast<float>(barb.size() - 1)));
+                ba.push_back(c.attr(v, 0.0f));
+            }
+            appendTube(out, barb, br, ba, 6);
+            ++stats.barbs;
+        }
     }
 }
 
@@ -235,8 +282,58 @@ void growTendrils(Context& c, Rng& rng, Mesh& out, GrowthStats& stats) {
             // Half sunk: the tissue heaves up along both flanks.
             if (i % 2 == 0) c.fuse(ground[i], normals[i], r * 2.8f, r * 0.7f);
         }
-        appendTube(out, pts, radii, attrs, 6);
+        appendTube(out, pts, radii, attrs, 8, true, c.style(0.32f, r0 * 2.2f, 0.0f, 1.0f, start));
         ++stats.tendrils;
+
+        // Rootlets: thinner side roots forking off and feeling across the
+        // tissue, so the network branches rather than running in parallel.
+        for (size_t i = 3; i + 3 < ground.size(); i += 4) {
+            if (rng.uniform() > c.f.tendrilBranching) continue;
+            Vec3 dir = ground[i + 1] - ground[i - 1];
+            const Vec3& n = normals[i];
+            dir -= n * dot(dir, n);
+            if (length(dir) < 1e-6f) continue;
+            dir = normalize(dir);
+            float turn = rng.range(0.6f, 1.2f) * (rng.uniform() < 0.5f ? -1.0f : 1.0f);
+            dir = normalize(dir * std::cos(turn) + cross(n, dir) * std::sin(turn));
+            const float reach = maxLength * rng.range(0.15f, 0.35f);
+            const float curl = rng.range(-0.15f, 0.15f);
+            std::vector<Vec3> branchGround{ground[i]}, branchNormals{n};
+            std::vector<uint32_t> branchUnder{under[i]};
+            Vec3 q = ground[i];
+            for (float walked = step; walked < reach; walked += step) {
+                const Vec3& nq = branchNormals.back();
+                dir = normalize(dir + cross(nq, dir) * curl);
+                Vec3 ahead = q + dir * step;
+                int32_t w = fine.nearest(ahead, step * 2.5f);
+                if (w < 0) break;
+                const uint32_t u = static_cast<uint32_t>(w);
+                const Vec3& nu = S.normals[u];
+                q = ahead - nu * dot(ahead - S.positions[u], nu);
+                if (c.infection(u) < 0.15f || c.cleared(q)) break;
+                dir -= nu * dot(dir, nu);
+                if (length(dir) < 1e-6f) break;
+                dir = normalize(dir);
+                branchGround.push_back(q);
+                branchNormals.push_back(nu);
+                branchUnder.push_back(u);
+            }
+            if (branchGround.size() < 3) continue;
+            const float rb = radii[i] * rng.range(0.35f, 0.55f);
+            std::vector<Vec3> bp;
+            std::vector<float> brad;
+            std::vector<CorruptionAttributes> battr;
+            for (size_t j = 0; j < branchGround.size(); ++j) {
+                float t = static_cast<float>(j) / static_cast<float>(branchGround.size() - 1);
+                float r = rb * (1.0f - 0.75f * t);
+                bp.push_back(branchGround[j] + branchNormals[j] * (r * 0.6f));
+                brad.push_back(r);
+                battr.push_back(c.attr(branchUnder[j], 0.0f));
+                if (j % 2 == 1) c.fuse(branchGround[j], branchNormals[j], r * 2.6f, r * 0.6f);
+            }
+            appendTube(out, bp, brad, battr, 6, true, c.style(0.2f, rb * 2.0f, 0.0f, 1.0f, start * 31u + static_cast<uint32_t>(i)));
+            ++stats.rootlets;
+        }
     }
 }
 
@@ -291,26 +388,30 @@ void growHearts(Context& c, Rng& rng, Mesh& out, GrowthStats& stats) {
                 Vec3 base = p + radial * (baseRadius * R) - n * (0.15f * R);
                 Vec3 control = base + n * (rise * R) + radial * (0.7f * R);
                 Vec3 tip = p + n * (tipHeight * R) + radial * (reachIn * R);
-                auto pts = sampleQuadratic(base, control, tip, 10);
+                auto pts = sampleQuadratic(base, control, tip, 20);
                 std::vector<float> radii;
                 std::vector<CorruptionAttributes> attrs;
                 float r0 = thickness * R * rng.range(0.8f, 1.2f);
+                const float clawLength = length(tip - base) + length(control - base) * 0.5f;
                 for (size_t j = 0; j < pts.size(); ++j) {
                     float t = static_cast<float>(j) / static_cast<float>(pts.size() - 1);
                     float flare = 1.0f + 0.25f * std::pow(1.0f - t, 8.0f);
                     radii.push_back(j + 1 == pts.size() ? 0.0f : r0 * flare * std::pow(1.0f - t, 1.1f));
                     attrs.push_back(c.attr(s, 0.0f));
                 }
-                appendTube(out, pts, radii, attrs, 8);
+                appendTube(out, pts, radii, attrs, 10, true,
+                           c.style(0.05f, r0 * 1.5f, 0.09f, clawLength * 0.05f, s * 131u + static_cast<uint32_t>(i)));
                 c.fuse(base + n * (0.15f * R), n, r0 * 3.0f, r0 * 0.8f);
             }
         };
 
         if (!maw) {
             const Vec3 centre = p + n * (R * 0.3f);
-            appendEllipsoid(*c.fleshOut, centre, ax, ay, n, Vec3{R, R, R * 0.8f}, 12, 18, [&](const Vec3& unit) {
+            const size_t v0 = c.fleshOut->vertexCount(), t0 = c.fleshOut->triangleCount();
+            appendEllipsoid(*c.fleshOut, centre, ax, ay, n, Vec3{R, R, R * 0.8f}, 16, 24, [&](const Vec3& unit) {
                 return c.softAttr(s, 0.3f + 0.5f * smoothstep(-0.3f, 0.85f, unit.z));
             });
+            roughen(*c.fleshOut, v0, t0, 0.06f * R * c.f.roughness, 0.45f * R, s);
             ring(c.f.heartClaws, 1.05f, 2.2f, 1.4f, 0.05f, 0.2f);
             c.fuse(p, n, R * 2.2f, R * 0.4f);
             ++stats.hearts;
@@ -371,7 +472,7 @@ void growHearts(Context& c, Rng& rng, Mesh& out, GrowthStats& stats) {
                 radii.push_back(j + 1 == pts.size() ? 0.0f : r0 * std::pow(1.0f - t, 0.9f));
                 attrs.push_back(c.attr(s, 0.0f));
             }
-            appendTube(out, pts, radii, attrs, 6);
+            appendTube(out, pts, radii, attrs, 6, true, c.style(0.08f, r0 * 1.5f, 0.0f, 1.0f, s * 17u + static_cast<uint32_t>(i)));
         }
 
         ring(c.f.heartClaws + 3, 2.1f, 3.0f, 1.7f, 0.85f, 0.22f);
@@ -411,8 +512,10 @@ void growVertebrae(Context& c, const VeinNetwork& veins, Mesh& out, GrowthStats&
             along = normalize(along);
             Vec3 side = normalize(cross(n, along));
             float w = std::max(path.radius[i], c.params.veinMaxWidth) * 2.6f * c.f.scale;
+            const size_t v0 = out.vertexCount(), t0 = out.triangleCount();
             appendEllipsoid(out, path.points[i] + n * (path.radius[i] * 0.9f), side, along, n,
-                            Vec3{w, w * 0.32f, w * 0.42f}, 6, 10, [&](const Vec3&) { return c.attr(v, 0.0f); });
+                            Vec3{w, w * 0.32f, w * 0.42f}, 8, 12, [&](const Vec3&) { return c.attr(v, 0.0f); });
+            roughen(out, v0, t0, 0.06f * w * c.f.roughness, 0.3f * w, v);
             c.fuse(path.points[i], n, w * 1.5f, w * 0.25f);
             ++stats.vertebrae;
         }
@@ -442,6 +545,7 @@ void growNodules(Context& c, Rng& rng, GrowthStats& stats) {
         Vec3 ay = cross(n, ax);
         bool eye = rng.uniform() < 0.5f;
         Vec3 centre = S.positions[v] + n * (r * 0.6f * 0.15f);
+        const size_t v0 = c.fleshOut->vertexCount(), t0 = c.fleshOut->triangleCount();
         appendEllipsoid(*c.fleshOut, centre, ax, ay, n, Vec3{r, r * 0.85f, r * 0.6f}, 10, 14, [&](const Vec3& unit) {
             if (eye) {
                 // A bright pupil ringed by a dark lid.
@@ -452,6 +556,7 @@ void growNodules(Context& c, Rng& rng, GrowthStats& stats) {
             // A sac, translucent and faintly lit toward its crown.
             return c.softAttr(v, 0.15f * smoothstep(0.3f, 1.0f, unit.z));
         });
+        if (!eye) roughen(*c.fleshOut, v0, t0, 0.1f * r * c.f.roughness, 0.5f * r, v);  // an eye stays glassy
         c.fuse(S.positions[v], n, r * 1.8f, r * 0.45f, 0.5f);
         ++stats.nodules;
     }
@@ -479,7 +584,7 @@ void growStrands(Context& c, Rng& rng, Mesh& out, GrowthStats& stats) {
         std::vector<Vec3> pts;
         std::vector<float> radii;
         std::vector<CorruptionAttributes> attrs;
-        const int samples = 10;
+        const int samples = 16;
         for (int i = 0; i < samples; ++i) {
             float t = static_cast<float>(i) / static_cast<float>(samples - 1);
             Vec3 p = S.positions[v] - n * (r0 * 0.8f) + n * (len * 0.12f * std::sin(t * kPi * 0.5f)) +
@@ -491,7 +596,8 @@ void growStrands(Context& c, Rng& rng, Mesh& out, GrowthStats& stats) {
             attrs.push_back(c.attr(v, glowing ? 0.55f * (0.3f + 0.7f * t) : 0.0f));
         }
         if (pts.size() < 4) continue;
-        appendTube(out, pts, radii, attrs, 5);
+        // Beaded like stretched goo.
+        appendTube(out, pts, radii, attrs, 6, true, c.style(0.3f, len * 0.2f, 0.0f, 1.0f, v));
         c.fuse(S.positions[v], n, r0 * 4.0f, r0 * 1.2f);
         // A drip gathering at the end.
         float rd = radii.back() * 1.5f;
@@ -551,7 +657,7 @@ void appendStrandTube(Context& c, uint32_t v, const std::vector<Vec3>& pts, floa
         radii.push_back(r * (1.0f - 0.45f * std::sin(kPi * t)));  // thinner in the middle, like stretched goo
         attrs.push_back(c.attr(v, glow));
     }
-    appendTube(out, pts, radii, attrs, 5);
+    appendTube(out, pts, radii, attrs, 6, true, c.style(0.3f, length(pts.back() - pts.front()) * 0.15f, 0.0f, 1.0f, v));
 }
 
 void growMembrane(Context& c, Rng& rng, uint32_t a, uint32_t b, float sagA, const std::vector<uint8_t>& used,
@@ -708,8 +814,10 @@ void growSacs(Context& c, Rng& rng, GrowthStats& stats) {
             float stretch = rng.range(1.0f, 1.5f);
             // Most are dark; a few hold a faint light under the crown.
             float glow = rng.uniform() < 0.3f ? rng.range(0.1f, 0.3f) : 0.0f;
-            appendEllipsoid(*c.fleshOut, S.positions[u] + nu * (r * 0.35f), ax, ay, nu, Vec3{r * stretch, r, r * 0.85f}, 9,
-                            14, [&](const Vec3& unit) { return c.softAttr(u, glow * smoothstep(0.3f, 1.0f, unit.z)); });
+            const size_t v0 = c.fleshOut->vertexCount(), t0 = c.fleshOut->triangleCount();
+            appendEllipsoid(*c.fleshOut, S.positions[u] + nu * (r * 0.35f), ax, ay, nu, Vec3{r * stretch, r, r * 0.85f}, 10,
+                            16, [&](const Vec3& unit) { return c.softAttr(u, glow * smoothstep(0.3f, 1.0f, unit.z)); });
+            roughen(*c.fleshOut, v0, t0, 0.12f * r * c.f.roughness, 0.55f * r, u);
             c.fuse(S.positions[u], nu, r * 1.9f, r * 0.45f);
             ++grown;
         }

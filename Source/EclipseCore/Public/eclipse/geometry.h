@@ -9,13 +9,36 @@
 
 namespace eclipse {
 
+// How organic a tube looks: knots and swellings along it, and growth rings
+// like a horn's. Amplitudes are shares of the local radius, so a tapering
+// tip stays sharp. All zero gives a smooth round tube.
+struct TubeStyle {
+    float lumps = 0.0f;           // knots and swellings
+    float lumpSize = 0.02f;       // metres between lumps
+    float rings = 0.0f;           // ridged growth rings
+    float ringSpacing = 0.01f;    // metres between rings
+    uint32_t seed = 1;
+};
+
 // A swept tube along a polyline, using parallel-transport frames so it never
 // twists. Each point carries its own radius and corruption attributes. A
 // zero radius at the last point closes the tube to a sharp tip; otherwise
 // both ends are capped flat. With `capped` false the flat caps are left off
-// (an open funnel, or a loop whose ends overlap); a sharp tip still closes. The target mesh must carry attributes.
+// (an open funnel, or a loop whose ends overlap); a sharp tip still closes.
+// The target mesh must carry attributes.
 ECLIPSECORE_API void appendTube(Mesh& mesh, const std::vector<Vec3>& points, const std::vector<float>& radii,
-                const std::vector<CorruptionAttributes>& attributes, int sides, bool capped = true);
+                const std::vector<CorruptionAttributes>& attributes, int sides, bool capped = true,
+                const TubeStyle& style = TubeStyle{});
+
+// Recomputes the normals of the vertices from `firstVertex` on, from the
+// triangles from `firstTriangle` on: for geometry appended and then reshaped.
+ECLIPSECORE_API void smoothNormalsFrom(Mesh& mesh, size_t firstVertex, size_t firstTriangle);
+
+// Pushes the vertices from `firstVertex` on in or out along their normals by
+// noise of the given amplitude (metres) and feature size, then refreshes
+// their normals: lumpy sacs and orbs instead of perfect ellipsoids.
+ECLIPSECORE_API void roughen(Mesh& mesh, size_t firstVertex, size_t firstTriangle, float amplitude, float featureSize,
+                             uint32_t seed);
 
 // An ellipsoid with semi-axes along a right-handed frame (x, y, z). The
 // attribute function receives each vertex's unit direction in that frame.

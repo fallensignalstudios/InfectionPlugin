@@ -68,15 +68,17 @@ surface; `--feature-scale` sizes the growths (the corridor defaults to 2).
 Then the growths, as separate geometry on top of the surface. Older tissue (near
 a seed) carries more and larger growths than the advancing front. Wherever a
 growth meets the surface, the tissue swells up around it (**fusion**), so horns,
-roots and claws rise out of the body instead of sitting on it.
+roots and claws rise out of the body instead of sitting on it. No growth is a
+perfect tube or sphere: roots and strands are knotted and beaded, horns and
+claws ringed, sacs and orbs lumpy (**roughness**, 0 for smooth).
 
 | Growth | Where | How |
 |---|---|---|
 | Vein tubes | Along every vein thick enough to see | Dark raised roots swept along the smoothed vein curves; a few stretches glow from within. |
-| Roots | Over the whole corruption | Ropes walked over the surface along the spread's own paths in toward the cores, thickening as they go and turned off-line so they spiral around limbs and columns. |
+| Roots | Over the whole corruption | Knotted ropes walked over the surface along the spread's own paths in toward the cores, thickening as they go and turned off-line so they spiral around limbs and columns. Thinner rootlets fork off them. |
 | Hearts | At each seed | A glowing orb gripped by a ring of claws. At high coverage it opens into a maw: a crater of lumpy lips around a ribbed throat that glows from deep inside, set with teeth and a wider ring of claws. Never larger than the curve of the body part it sits on; other growths keep out of its space. |
 | Vertebrae | Along the thickest vein trunks | Segmented ridges, like a spine under the skin. |
-| Horns | Oldest tissue, near the cores | Scythes swept along the growth: most modest, a rare few several times longer. |
+| Horns | Oldest tissue, near the cores | Scythes swept along the growth: most modest, a rare few several times longer. Uneven growth rings like real horn; the big ones carry small hooked barbs. |
 | Eyes and sacs | Flatter hollows inside plates | Half-buried ellipsoids in swollen sockets: eyes with a bright pupil ringed by a dark lid, or sacs faintly lit toward the crown. |
 | Sac clusters | Folds and corners | Packed clusters of translucent pods, a few lit faintly from within. |
 | Hanging strands | Undersides and overhangs | Gravity-drooping, swaying tubes ending in a drip; some glow. A strand stops where it would sink back into the host. |
