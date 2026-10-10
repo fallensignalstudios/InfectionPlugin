@@ -21,6 +21,7 @@ namespace
 {
 	const FName TestSlot(TEXT("EclipseTestSurface"));
 	const FColor TestData(128, 64, 32, 192);
+	constexpr float TestFlesh = 0.75f;
 
 	FMeshDescription TestDescription(const FReferenceSkeleton* Reference = nullptr)
 	{
@@ -35,6 +36,7 @@ namespace
 			Data.glow = TestData.G / 255.0f;
 			Data.crack = TestData.B / 255.0f;
 			Data.plateTint = TestData.A / 255.0f;
+			Data.flesh = TestFlesh;
 			Data.arrival = 0.0f;
 		}
 		Geometry.attributes[1].arrival = 1.0f;
@@ -96,7 +98,9 @@ bool FEclipseSkeletalColorDataTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("Glow reaches the skeletal importer unchanged"), Wedge.Color.G, TestData.G);
 		TestEqual(TEXT("Cracks reach the skeletal importer unchanged"), Wedge.Color.B, TestData.B);
 		TestEqual(TEXT("Plate tint reaches the skeletal importer unchanged"), Wedge.Color.A, TestData.A);
+		TestEqual(TEXT("Soft tissue reaches the skeletal importer in UV 1"), Wedge.UVs[1].X, TestFlesh);
 	}
+	TestTrue(TEXT("The importer receives both UV channels"), ImportData.NumTexCoords >= 2);
 	return true;
 }
 

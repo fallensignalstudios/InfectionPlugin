@@ -57,10 +57,22 @@ Next on characters: strands that swing (physics or AnimDynamics), carrying morph
 - Roots, hearts and maws, vertebrae and long-tailed scythe horns; dark raised veins; glow kept to cores, eyes and a few seams.
 - Defaults retuned to match (flatter, longer plates; quieter seams; a dark bruise at the front instead of magenta).
 
+## Realism pass
+
+- **Soft tissue** is its own mesh with its own subsurface-scattering material (`M_EclipseFlesh`): hearts, throats, eyes, sacs, membranes and drips are wet and translucent; carapace stays clear-coated.
+- **Fusion**: the surface swells up around every growth's base, so growths rise out of the tissue.
+- **Maws** are real craters: lumpy lips, a ribbed throat glowing from the bottom, teeth on the rim, claws curling over; other growths keep out.
+- **Sac clusters** in folds and corners.
+- **Detail maps** generated in code (chitin scales and striations, flesh folds and pores), tiled triplanar over the bind pose so they stay put on animated characters; cavity darkening; raw tissue in the seams.
+- The seed's core light no longer smears along creases.
+
+Not done here: Nanite displacement (true silhouette detail from the maps). It needs per-project tessellation settings and an in-engine test; the detail is in the normals for now.
+
 ## Later
 
 - Strands that swing (physics or AnimDynamics) on characters.
 - Seeding new outbreaks at runtime, growing on the fly where the player is.
 - Permanent, unlimited burn scars (a render-target mask instead of four spheres).
 - Tearing the host silhouette at late stage.
-- Cutting into the host: a portal or burrow carved into a wall, not only grown onto it.
+- Cutting into the host: a portal or burrow carved into a wall (maws are raised craters for now).
+- Nanite displacement from the detail maps.

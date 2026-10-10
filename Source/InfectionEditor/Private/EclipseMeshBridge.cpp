@@ -195,7 +195,7 @@ namespace EclipseBridge
 		TVertexInstanceAttributesRef<FVector3f> Normals = Attributes.GetVertexInstanceNormals();
 		TVertexInstanceAttributesRef<FVector4f> Colors = Attributes.GetVertexInstanceColors();
 		TVertexInstanceAttributesRef<FVector2f> UVs = Attributes.GetVertexInstanceUVs();
-		UVs.SetNumChannels(1);
+		UVs.SetNumChannels(2);  // 0: arrival and height; 1: soft tissue
 
 		const int32 VertexCount = static_cast<int32>(Mesh.positions.size());
 		const int32 TriangleCount = static_cast<int32>(Mesh.triangles.size());
@@ -264,6 +264,7 @@ namespace EclipseBridge
 				const FColor Bytes(Channel(A.infection), Channel(A.glow), Channel(A.crack), Channel(A.plateTint));
 				Colors[Instance] = FVector4f(Skin ? Bytes.ReinterpretAsLinear() : FLinearColor(Bytes));
 				UVs.Set(Instance, 0, FVector2f(A.arrival, A.height));
+				UVs.Set(Instance, 1, FVector2f(A.flesh, 0.0f));
 			}
 			Instances[Index] = Instance;
 		}

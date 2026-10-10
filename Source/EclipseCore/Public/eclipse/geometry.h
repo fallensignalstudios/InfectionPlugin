@@ -12,9 +12,10 @@ namespace eclipse {
 // A swept tube along a polyline, using parallel-transport frames so it never
 // twists. Each point carries its own radius and corruption attributes. A
 // zero radius at the last point closes the tube to a sharp tip; otherwise
-// both ends are capped flat. The target mesh must carry attributes.
+// both ends are capped flat. With `capped` false the flat caps are left off
+// (an open funnel, or a loop whose ends overlap); a sharp tip still closes. The target mesh must carry attributes.
 ECLIPSECORE_API void appendTube(Mesh& mesh, const std::vector<Vec3>& points, const std::vector<float>& radii,
-                const std::vector<CorruptionAttributes>& attributes, int sides);
+                const std::vector<CorruptionAttributes>& attributes, int sides, bool capped = true);
 
 // An ellipsoid with semi-axes along a right-handed frame (x, y, z). The
 // attribute function receives each vertex's unit direction in that frame.

@@ -18,6 +18,7 @@
 
 #include "eclipse/corruption.h"
 #include "eclipse/export.h"
+#include "eclipse/detail.h"
 #include "eclipse/geometry.h"
 #include "eclipse/growths.h"
 #include "eclipse/hosts.h"
@@ -372,10 +373,11 @@ TEST(glb_is_well_formed) {
     std::string json(bytes.data() + 20, jsonLen);
     CHECK(json.find("\"COLOR_0\"") != std::string::npos);
     CHECK(json.find("\"TEXCOORD_0\"") != std::string::npos);
+    CHECK(json.find("\"TEXCOORD_1\"") != std::string::npos);
     uint32_t binLen = u32(20 + jsonLen);
     CHECK(u32(24 + jsonLen) == 0x004E4942u);
     CHECK(28 + jsonLen + binLen == bytes.size());
-    size_t expected = out.vertexCount() * (12 + 12 + 16 + 8) + out.triangleCount() * 12;
+    size_t expected = out.vertexCount() * (12 + 12 + 16 + 8 + 8) + out.triangleCount() * 12;
     CHECK(binLen >= expected && binLen < expected + 32);
     removeFile(path);
 }
@@ -413,6 +415,43 @@ TEST(preview_renders_the_glow) {
     CHECK(writePng(path, im));
     CHECK(std::filesystem::file_size(path) > static_cast<uintmax_t>(160 * 180 * 3));
     removeFile(path);
+}
+
+TEST(preview_renders_the_interpolated_flesh_channel) {
+    // Keep all geometry and other corruption data identical, so changing the
+    // soft-tissue mask alone must change the rendered pixels. A gradient also
+    // exercises interpolation inside triangles rather than just their corners.
+    Mesh hard = sphere(0.2f, 0.04f);
+    hard.attributes.resize(hard.vertexCount());
+    for (auto& a : hard.attributes) a.infection = 1.0f;
+    Mesh soft = hard;
+    for (auto& a : soft.attributes) a.flesh = 1.0f;
+    Mesh gradient = hard;
+    for (size_t i = 0; i < gradient.vertexCount(); ++i)
+        gradient.attributes[i].flesh = clamp01(gradient.positions[i].x / 0.4f + 0.5f);
+    PreviewOptions options;
+    options.width = 96;
+    options.height = 96;
+    options.supersample = 1;
+    options.yaws = {0.0f};
+    const Image hardImage = renderPreview(hard, options);
+    const Image softImage = renderPreview(soft, options);
+    const Image gradientImage = renderPreview(gradient, options);
+    CHECK(hardImage.width == 96 && hardImage.height == 96);
+    CHECK(hardImage.rgb.size() == softImage.rgb.size() && hardImage.rgb.size() == gradientImage.rgb.size());
+    size_t softPixels = 0, gradientPixels = 0;
+    for (size_t i = 0; i < hardImage.rgb.size(); i += 3) {
+        bool softDiffers = false, gradientDiffers = false;
+        for (size_t c = 0; c < 3; ++c) {
+            softDiffers = softDiffers || hardImage.rgb[i + c] != softImage.rgb[i + c];
+            gradientDiffers = gradientDiffers || hardImage.rgb[i + c] != gradientImage.rgb[i + c];
+        }
+        softPixels += softDiffers;
+        gradientPixels += gradientDiffers;
+    }
+    CHECK(softPixels > 100);
+    CHECK(gradientPixels > 100);
+    CHECK(gradientImage.rgb != softImage.rgb);
 }
 
 // Signed volume; positive when a closed mesh's faces point outward.
@@ -536,9 +575,107 @@ TEST(growths_stay_near_the_corruption) {
             infected.push_back(g.surface.positions[v]);
     PointGrid grid(infected, 0.05f);
     size_t stray = 0;
-    for (size_t i = 0; i < g.growths.vertexCount(); i += 7)
-        if (grid.nearest(g.growths.positions[i], FeatureParams{}.spikeLength * 7.0f) < 0) ++stray;
+    for (const Mesh* m : {&g.growths, &g.flesh})
+        for (size_t i = 0; i < m->vertexCount(); i += 7)
+            if (grid.nearest(m->positions[i], FeatureParams{}.spikeLength * 7.0f) < 0) ++stray;
     CHECK(stray == 0);
+}
+
+TEST(detail_maps_tile_seamlessly) {
+    for (DetailKind kind : {DetailKind::Chitin, DetailKind::Flesh}) {
+        const int n = 128;
+        DetailMap m = makeDetailMap(kind, n);
+        CHECK(m.size == n);
+        CHECK(m.rgba.size() == static_cast<size_t>(n) * n * 4);
+        CHECK(m.rgba == makeDetailMap(kind, n).rgba);
+        CHECK(m.rgba != makeDetailMap(kind, n, 2).rgba);
+        auto at = [&](int x, int y, int c) { return static_cast<float>(m.rgba[(static_cast<size_t>(y) * n + x) * 4 + c]); };
+        // Across the wrap the height steps no more than across some column
+        // inside. (Not the average: cell edges gather on the columns at whole
+        // cell widths, and the wrap is one of them.)
+        for (int axis = 0; axis < 2; ++axis) {
+            auto h = [&](int along, int across) { return axis == 0 ? at(along, across, 2) : at(across, along, 2); };
+            float seam = 0.0f, steepest = 0.0f;
+            for (int i = 0; i < n; ++i) seam += std::fabs(h(n - 1, i) - h(0, i));
+            for (int k = 0; k + 1 < n; ++k) {
+                float step = 0.0f;
+                for (int i = 0; i < n; ++i) step += std::fabs(h(k, i) - h(k + 1, i));
+                steepest = std::max(steepest, step);
+            }
+            CHECK(seam <= steepest);
+        }
+        // Slopes average out to flat, and the map is not flat.
+        double slope = 0.0, spread = 0.0;
+        for (int i = 0; i < n * n; ++i) {
+            slope += m.rgba[static_cast<size_t>(i) * 4];
+            spread += std::fabs(m.rgba[static_cast<size_t>(i) * 4 + 2] - 128.0);
+        }
+        CHECK(std::fabs(slope / (n * n) - 127.5) < 6.0);
+        CHECK(spread / (n * n) > 10.0);
+    }
+}
+
+TEST(soft_tissue_is_its_own_mesh) {
+    const Growth& g = grownMannequin();
+    CHECK(g.stats.sacs > 0);
+    CHECK(g.flesh.triangleCount() > 0);
+    CHECK(g.flesh.attributes.size() == g.flesh.vertexCount());
+    CHECK(g.flesh.normals.size() == g.flesh.vertexCount());
+    bool soft = true, hard = true, valid = true;
+    for (const auto& a : g.flesh.attributes) soft = soft && a.flesh == 1.0f && a.infection == 1.0f;
+    for (const auto& a : g.growths.attributes) hard = hard && a.flesh == 0.0f;
+    for (const auto& t : g.flesh.triangles)
+        for (uint32_t i : t) valid = valid && i < g.flesh.vertexCount();
+    CHECK(soft);
+    CHECK(hard);
+    CHECK(valid);
+}
+
+TEST(tissue_swells_around_growths) {
+    GrowthParams p;
+    p.coverage = 0.6f;
+    FeatureParams flat;
+    flat.fusion = 0.0f;
+    Growth with = grow(mannequin().mesh, mannequin().defaultSeeds, p, FeatureParams{});
+    Growth without = grow(mannequin().mesh, mannequin().defaultSeeds, p, flat);
+    // The growths themselves are unchanged; only the surface under them rises.
+    CHECK(meshHash(with.growths) == meshHash(without.growths));
+    size_t raised = 0;
+    bool outward = true, bounded = true, infected = true;
+    for (size_t v = 0; v < with.surface.vertexCount(); ++v) {
+        Vec3 d = with.surface.positions[v] - without.surface.positions[v];
+        float lift = dot(d, without.surface.normals[v]);
+        if (length(d) < 1e-6f) continue;
+        ++raised;
+        outward = outward && lift > 0.0f;
+        bounded = bounded && length(d) < 0.03f;
+        infected = infected && with.surface.attributes[v].infection > 0.0f;
+    }
+    CHECK(raised > 1000);
+    CHECK(outward);
+    CHECK(bounded);
+    CHECK(infected);
+}
+
+TEST(a_maw_keeps_its_throat_open) {
+    const Growth& g = grownMannequin();  // coverage past mawCoverage
+    CHECK(g.stats.maws == g.stats.hearts);
+    // Nothing hard grows down the middle of the throat, and the floor under
+    // it is not swollen shut.
+    GrowthParams p;
+    p.coverage = 0.85f;
+    FeatureParams flat;
+    flat.fusion = 0.0f;
+    Growth without = grow(mannequin().mesh, mannequin().defaultSeeds, p, flat);
+    const float R = FeatureParams{}.heartRadius * 0.6f;  // the smallest a heart can be
+    bool clear = true, open = true;
+    for (uint32_t s : g.spread.seedVertices) {
+        const Vec3 at = g.surface.positions[s];
+        for (const Vec3& q : g.growths.positions) clear = clear && length(q - at) > 0.3f * R;
+        open = open && length(at - without.surface.positions[s]) < 1e-4f;
+    }
+    CHECK(clear);
+    CHECK(open);
 }
 
 TEST(growths_are_deterministic_and_seeded) {

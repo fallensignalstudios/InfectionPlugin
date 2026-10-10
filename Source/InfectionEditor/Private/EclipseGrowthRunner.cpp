@@ -34,6 +34,7 @@ namespace
 	const FName GeneratedTag(TEXT("EclipseGenerated"));
 	const FName SurfaceSlot(TEXT("EclipseSurface"));
 	const FName GrowthsSlot(TEXT("EclipseGrowths"));
+	const FName FleshSlot(TEXT("EclipseFlesh"));
 	constexpr float OverlayLift = 0.0015f;  // metres the shell floats above the host
 	constexpr float WeldTolerance = 0.0001f;
 
@@ -123,6 +124,9 @@ namespace
 		F.heartRadius = S.HeartSize * 0.01f;
 		F.mawCoverage = S.MawCoverage;
 		F.vertebrae = S.bVertebrae;
+		F.fusion = S.Fusion;
+		F.sacs = S.bSacs;
+		F.sacChance = S.SacChance;
 		return F;
 	}
 
@@ -357,11 +361,12 @@ namespace EclipseGrowthRunner
 			eclipse::Growth Result = eclipse::grow(Source.Mesh, Seeds, Params, Features);
 			std::vector<uint32_t> ShellSources;
 			const eclipse::Mesh Surface = bOverlay ? eclipse::extractShell(Result.surface, OverlayLift, &ShellSources) : std::move(Result.surface);
-			eclipse::SkinTable SurfaceSkin, GrowthSkin;
+			eclipse::SkinTable SurfaceSkin, GrowthSkin, FleshSkin;
 			if (bSkeletal)
 			{
 				SurfaceSkin = bOverlay ? eclipse::skinFromSources(Skin, ShellSources) : Skin;
 				GrowthSkin = eclipse::bindToNearest(Source.Mesh.positions, Skin, Result.growths.positions);
+				FleshSkin = eclipse::bindToNearest(Source.Mesh.positions, Skin, Result.flesh.positions);
 			}
 
 			Task.EnterProgressFrame(1.0f, LOCTEXT("Writing", "Writing meshes"));
@@ -410,7 +415,8 @@ namespace EclipseGrowthRunner
 			};
 			const bool bOk = Write(Surface, SurfaceSkin, bOverlay ? TEXT("_Shell") : TEXT("_Surface"),
 								 bOverlay ? Materials.Overlay : Materials.Replace, SurfaceSlot) &&
-							 Write(Result.growths, GrowthSkin, TEXT("_Growths"), Materials.Growths, GrowthsSlot);
+							 Write(Result.growths, GrowthSkin, TEXT("_Growths"), Materials.Growths, GrowthsSlot) &&
+							 Write(Result.flesh, FleshSkin, TEXT("_Flesh"), Materials.Flesh, FleshSlot);
 			if (!bOk)
 			{
 				continue;

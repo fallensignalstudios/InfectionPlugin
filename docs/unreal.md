@@ -35,8 +35,9 @@ The plugin has three modules:
    A seed affects a mesh when it is within 1 m of the mesh's bounds.
 3. Select the mesh (or several) and press **Grow on Selected**.
 
-The generated actors are attached to the host, labelled `<Host> Eclipse_Shell`
-and `<Host> Eclipse_Growths`, and replaced each time you grow again. Their
+The generated actors are attached to the host, labelled `<Host> Eclipse_Shell`,
+`<Host> Eclipse_Growths` and `<Host> Eclipse_Flesh` (the soft tissue), and
+replaced each time you grow again. Their
 meshes are written to `<Output Folder>/Generated` and are unsaved until you
 **Save All**. Undo removes the placed actors; the generated assets stay until you delete them.
 
@@ -45,7 +46,9 @@ meshes are written to `<Output Folder>/Generated` and are unsaved until you
 The panel remembers its settings, so values from before the art pass (plate
 thickness, stretch, seam glow) stay as they were. Right-click the panel's
 categories and **Reset to Default** to pick up the new look, and press
-**Rebuild Materials** once for the darker inflamed colour.
+**Rebuild Materials** once: it regenerates the carapace material with the
+detail maps and the tissue in its seams. (The soft-tissue material and the
+detail textures are created on the next grow even without it.)
 
 ### Output modes
 
@@ -66,6 +69,10 @@ rather than exceed **Max Vertices**.
 Vertices that are split along UV or smoothing seams are welded first, so the
 spread crosses those seams. Generated meshes have Nanite enabled by default.
 
+**Fusion** (Growths) sets how much the tissue swells up around each growth's
+base; 0 leaves growths sitting on the surface. **Sacs** and **Sac Chance**
+control the pod clusters that gather in folds and corners.
+
 ## Characters (skeletal meshes)
 
 Select an actor with a skeletal mesh and grow as usual. The corruption is
@@ -74,7 +81,7 @@ reference pose while placing seeds (no animation assigned in the editor), and
 seeds go where the corruption should start on that pose.
 
 The result is two skeletal meshes on the host's own skeleton,
-`SK_Eclipse_<Host>_Shell` and `SK_Eclipse_<Host>_Growths`, each a copy of the
+`SK_Eclipse_<Host>_Shell`, `SK_Eclipse_<Host>_Growths` and `SK_Eclipse_<Host>_Flesh`, each a copy of the
 host mesh reduced to one LOD and one material. Every vertex carries bone
 weights: the shell takes the weights of the skin it lies on, and growths blend
 the weights of the tissue nearest them, so a strand follows the limb it hangs
@@ -136,19 +143,29 @@ Notes:
 - An infected actor attached under another plays its own spread; the parent's
   component leaves it alone.
 
-## The material
+## The materials
 
-The first grow creates `<Output Folder>/Materials/M_EclipseBiomass` and three
-instances. Edit the instances; regenerate everything with **Rebuild Materials**.
+![Maw, fusion and the detail maps](previews/realism.jpg)
 
-| Instance | Used on |
+The first grow creates, under `<Output Folder>/Materials`, two masters, four
+instances and two detail textures. Edit the instances; regenerate everything
+with **Rebuild Materials**.
+
+| Asset | What it is |
 |---|---|
+| `M_EclipseBiomass` | Carapace: masked, two-sided, clear coat |
+| `M_EclipseFlesh` | Soft tissue: masked, two-sided, subsurface scattering |
 | `MI_Eclipse_Overlay` | overlay shells |
 | `MI_Eclipse_Replace` | replacing surfaces |
-| `MI_Eclipse_Growths` | thorns, eyes, strands, bridges, membranes, vein tubes |
+| `MI_Eclipse_Growths` | horns, claws, roots, vertebrae, strands, bridges |
+| `MI_Eclipse_Flesh` | hearts, throats, eyes, sacs, membranes, drips |
+| `T_EclipseChitin`, `T_EclipseFlesh` | Generated detail maps (512², uncompressed): height slopes in RG, height in B, cavity in A. Not colour. |
 
-The master is masked, two-sided and clear-coat. Its logic is five small Custom
-(HLSL) nodes you can read and edit in the material editor. Parameters:
+The detail is tiled triplanar over the mesh's **bind pose** (pre-skinned
+position), so it stays fixed to a character's skin as it animates. The
+materials output a world-space normal, so they need no tangents from the mesh.
+Their logic is small Custom (HLSL) nodes you can read and edit in the material
+editor. Parameters:
 
 | Parameter | Default | Effect |
 |---|---|---|
@@ -163,6 +180,12 @@ The master is masked, two-sided and clear-coat. Its logic is five small Custom
 | `InflamedColor` | dark magenta | Tissue at the front, before it blackens. |
 | `HostColor` | grey | Clean tissue, Replace mode only. |
 | `ClearCoatRoughness` | 0.06 | The wet sheen. |
+| `DetailScale` | 12 cm | Size of one tile of the chitin detail (flesh tiles 1.7 times finer). |
+| `DetailStrength`, `FleshDetail` | 0.35, 1.3 | How deep the detail reads; the second multiplies it on soft tissue. |
+| `CavityStrength` | 0.6 | Darkening down in the detail's grooves. |
+| `FleshColor`, `FleshDeep` | dark wine | Soft tissue, and its folds. Also shows in carapace seams. |
+| `ScatterColor`, `Translucency` | red-violet, 0.65 | Light passing through soft tissue (flesh master). |
+| `FleshRoughness`, `FleshGlow` | 0.32, 0.15 | Wet sheen of tissue; faint scattered light at grazing angles. |
 | `OverlayMode`, `IsGrowth` | set per instance | Leave as the instances set them. |
 
 The vertex data the material reads is listed in the README's output contract.
@@ -174,8 +197,10 @@ by CI, including as a DLL that exports only the functions marked
 `ECLIPSECORE_API`, the way the Unreal editor links it. On UE 5.8.3, the plugin's
 Editor, Game Development and Game Shipping builds have passed with precompiled
 headers and unity builds disabled (`-NoPCH -NoSharedPCH -DisableUnity`, the
-flags used by `BuildPlugin -StrictIncludes`). The 35 standalone tests and six
-Unreal automation tests also pass. Run all Unreal tests with
+flags used by `BuildPlugin -StrictIncludes`), with the 35 standalone tests and
+six Unreal automation tests passing, as of the live-spread fixes. The realism
+pass adds standalone tests (39 now) and a materials automation test; its
+engine side awaits the same build. Run all Unreal tests with
 `Automation RunTests Infection`: they check skeletal corruption-channel bytes,
 skeletal regeneration after host changes, sparse-map queries, and live-spread
 burns and scaled world distances. The three spread tests failed on the original
@@ -192,6 +217,9 @@ Engine APIs that have moved between versions, and what to check:
 | `UMaterialEditingLibrary` missing | `InfectionEditor.Build.cs` | It lives in the `MaterialEditor` module, already listed. |
 | Material settings not applied | `EclipseMaterials.cpp` | Blend mode and two-sided are set by property name; check the names `BlendMode` and `TwoSided` on `UMaterial`. |
 | Nanite not enabled on outputs | `EclipseMeshBridge.cpp` | Set by property name `NaniteSettings.bEnabled`; enable it in the mesh editor meanwhile. |
+| `PreSkinnedPosition` / `VertexInterpolator` / `Transform` errors | `EclipseMaterials.cpp` | Detail uses the bind-pose position through a vertex interpolator; check those expression classes' member names (`VSOutput`, `Input`, `TransformSourceType`). |
+| Detail textures empty or wrong | `EclipseMaterials.cpp`, `BuildDetailTexture` | Written with `Source.Init(..., TSF_BGRA8, ...)` and `TC_VectorDisplacementmap`; check `FTextureSource::Init`. |
+| Lighting looks inverted or flat | `EclipseMaterials.cpp` | The normal is world space via the `bTangentSpaceNormal` property set by name; check it is off on both masters. |
 | Skeletal output is empty or fails to commit | `EclipseMeshBridge.cpp`, `WriteSkeletalMesh` | The description includes skin weights and the host's reference bones; check the current skeletal mesh commit and build APIs. |
 
 Paste the compiler output into a session and it can be fixed quickly.

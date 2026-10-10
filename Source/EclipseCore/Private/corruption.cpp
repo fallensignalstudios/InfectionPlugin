@@ -438,12 +438,19 @@ SurfaceGrowth growSurface(const Mesh& hostIn, const std::vector<Vec3>& seeds, co
         float veinScale = params.veinMaxWidth > 0 ? std::sqrt(veins.radius[v] / params.veinMaxWidth) : 0.0f;
         height += params.veinHeight * vein * veinScale * (1.0f - armour);
 
+        // Measured straight from the seed: the weighted spread distance runs
+        // long and thin along creases, which smeared the light far from it.
         float core = 0.0f;
-        if (spread.threshold > 0.0f && params.coreRadius > 0.0f)
-            core = 1.0f - smoothstep(0.0f, params.coreRadius, spread.distance[v]);
+        if (spread.threshold > 0.0f && params.coreRadius > 0.0f) {
+            float nearest = kInf;
+            for (uint32_t s : spread.seedVertices) nearest = std::min(nearest, length(p - host.positions[s]));
+            core = 1.0f - smoothstep(0.0f, params.coreRadius, nearest);
+        }
 
         a.infection = std::max(inf, smoothstep(0.0f, 0.6f, vein));
         a.crack = crack;
+        // The tissue under the carapace shows in the seams.
+        a.flesh = crack;
         // Veins stain the tissue dark and glow only faintly; light belongs to
         // the cores, the eyes and the seams that leak it.
         a.glow = std::max({vein * (1.0f - 0.85f * armour) * 0.05f, crackLight * 0.6f, core});
