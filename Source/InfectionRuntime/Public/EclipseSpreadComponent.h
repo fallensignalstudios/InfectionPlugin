@@ -13,7 +13,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FEclipseSpreadEvent);
 // Plays a grown corruption during the game. Every mesh on this actor (and on
 // actors attached to it) that uses an Eclipse material follows Growth: 0
 // shows nothing, 1 the corruption as grown, FullGrowth also the veins that
-// ran ahead. Burn() cuts it back locally with glowing edges, and
+// ran ahead (the growth panel sets it from the vein reach). Burn() cuts it back locally with glowing edges, and
 // GetInfectionAt() tells gameplay how infected a spot is right now.
 //
 // The Eclipse Growth panel adds one of these to every host it grows on.
@@ -33,11 +33,11 @@ public:
 
 	// How far the growth has played; see the class comment.
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Eclipse", meta = (ClampMin = "0"))
-	float Growth = 1.4f;
+	float Growth = 1.5f;
 
 	// Growth at which the spread counts as finished.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Eclipse", meta = (ClampMin = "0.1"))
-	float FullGrowth = 1.4f;
+	float FullGrowth = 1.5f;
 
 	// Seconds a spread takes from nothing to FullGrowth at play rate 1.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Eclipse", meta = (ClampMin = "0.01", Units = "s"))
@@ -81,7 +81,8 @@ public:
 	float GetGrowth() const { return Growth; }
 
 	// Burn the corruption away within Radius of a point. The four most recent
-	// burns are kept; a fifth replaces the oldest.
+	// burns are kept; a fifth replaces the oldest. Burns stay with the actor
+	// if it moves.
 	UFUNCTION(BlueprintCallable, Category = "Eclipse")
 	void Burn(FVector WorldLocation, float Radius);
 
@@ -105,14 +106,17 @@ protected:
 	virtual void BeginPlay() override;
 
 private:
-	// Dynamic instances of every Eclipse material slot under this actor.
+	// Dynamic instances of every Eclipse material slot under this actor,
+	// stopping at attached actors that have a spread component of their own.
 	void CollectMaterials();
+	void CollectFrom(AActor* Actor);
 	void Apply();
+	bool NeedsTick() const;
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UMaterialInstanceDynamic>> Materials;
 
-	TArray<FVector4> Burns;  // world centre, radius in W
+	TArray<FVector4> Burns;  // actor-space centre, actor-space radius in W
 	int32 NextBurn = 0;
 	float PlayRate = 0.0f;
 };

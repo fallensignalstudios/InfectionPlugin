@@ -1,6 +1,7 @@
 #include "EclipseSpreadComponent.h"
 
 #include "Components/MeshComponent.h"
+#include "Components/SceneComponent.h"
 #include "EclipseInfectionMap.h"
 #include "GameFramework/Actor.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -10,6 +11,9 @@ namespace
 {
 	const FName GrowthParameter(TEXT("Growth"));
 	const FName BurnSoftnessParameter(TEXT("BurnSoftness"));
+	// The material reveals a point over this much growth after it arrives;
+	// queries count it once it is half shown.
+	constexpr float RevealMidpoint = 0.04f;
 	const FName BurnParameters[UEclipseSpreadComponent::MaxBurns] = {
 		TEXT("Burn0"), TEXT("Burn1"), TEXT("Burn2"), TEXT("Burn3")};
 }
@@ -37,39 +41,49 @@ void UEclipseSpreadComponent::BeginPlay()
 void UEclipseSpreadComponent::CollectMaterials()
 {
 	Materials.Reset();
-	AActor* Owner = GetOwner();
-	if (!Owner)
+	if (AActor* Owner = GetOwner())
 	{
-		return;
+		CollectFrom(Owner);
 	}
-	TArray<AActor*> Actors;
-	Owner->GetAttachedActors(Actors, true, /*bRecursivelyIncludeAttachedActors*/ true);
-	Actors.Insert(Owner, 0);
-	for (AActor* Actor : Actors)
+}
+
+void UEclipseSpreadComponent::CollectFrom(AActor* Actor)
+{
+	TInlineComponentArray<UMeshComponent*> Meshes(Actor);
+	for (UMeshComponent* Mesh : Meshes)
 	{
-		TInlineComponentArray<UMeshComponent*> Meshes(Actor);
-		for (UMeshComponent* Mesh : Meshes)
+		for (int32 Slot = 0; Slot < Mesh->GetNumMaterials(); ++Slot)
 		{
-			for (int32 Slot = 0; Slot < Mesh->GetNumMaterials(); ++Slot)
+			UMaterialInterface* Material = Mesh->GetMaterial(Slot);
+			float Unused = 0.0f;
+			// Only Eclipse materials carry both of these; leave every other material alone.
+			if (!Material || !Material->GetScalarParameterValue(FHashedMaterialParameterInfo(GrowthParameter), Unused) ||
+				!Material->GetScalarParameterValue(FHashedMaterialParameterInfo(BurnSoftnessParameter), Unused))
 			{
-				UMaterialInterface* Material = Mesh->GetMaterial(Slot);
-				float Unused = 0.0f;
-				// Only Eclipse materials have a Growth parameter; leave the rest alone.
-				if (!Material || !Material->GetScalarParameterValue(FHashedMaterialParameterInfo(GrowthParameter), Unused))
-				{
-					continue;
-				}
-				if (UMaterialInstanceDynamic* Dynamic = Mesh->CreateDynamicMaterialInstance(Slot, Material))
-				{
-					Materials.Add(Dynamic);
-				}
+				continue;
 			}
+			if (UMaterialInstanceDynamic* Dynamic = Mesh->CreateDynamicMaterialInstance(Slot, Material))
+			{
+				Materials.Add(Dynamic);
+			}
+		}
+	}
+	TArray<AActor*> Children;
+	Actor->GetAttachedActors(Children);
+	for (AActor* Child : Children)
+	{
+		// A separately grown host attached here plays its own spread.
+		if (Child && !Child->FindComponentByClass<UEclipseSpreadComponent>())
+		{
+			CollectFrom(Child);
 		}
 	}
 }
 
 void UEclipseSpreadComponent::Apply()
 {
+	const AActor* Owner = GetOwner();
+	const float Scale = Owner ? static_cast<float>(Owner->GetActorScale3D().GetAbsMax()) : 1.0f;
 	for (UMaterialInstanceDynamic* Material : Materials)
 	{
 		if (!Material)
@@ -80,8 +94,14 @@ void UEclipseSpreadComponent::Apply()
 		Material->SetScalarParameterValue(BurnSoftnessParameter, BurnSoftness);
 		for (int32 Index = 0; Index < MaxBurns; ++Index)
 		{
-			const FVector4 B = Burns.IsValidIndex(Index) ? Burns[Index] : FVector4(0, 0, 0, 0);
-			Material->SetVectorParameterValue(BurnParameters[Index], FLinearColor(B.X, B.Y, B.Z, B.W));
+			FLinearColor World(0, 0, 0, 0);
+			if (Burns.IsValidIndex(Index) && Owner)
+			{
+				const FVector4& B = Burns[Index];
+				const FVector Centre = Owner->GetActorTransform().TransformPosition(FVector(B.X, B.Y, B.Z));
+				World = FLinearColor(Centre.X, Centre.Y, Centre.Z, B.W * Scale);
+			}
+			Material->SetVectorParameterValue(BurnParameters[Index], World);
 		}
 	}
 }
@@ -91,14 +111,16 @@ void UEclipseSpreadComponent::TickComponent(float DeltaTime, ELevelTick TickType
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 	if (PlayRate == 0.0f)
 	{
-		SetComponentTickEnabled(false);
+		// Only burns on a moving actor still need following.
+		Apply();
+		SetComponentTickEnabled(NeedsTick());
 		return;
 	}
 	Growth += PlayRate * (FullGrowth / FMath::Max(SpreadDuration, 0.01f)) * DeltaTime;
 	bool bFinished = false, bReceded = false;
 	if (Growth >= FullGrowth && PlayRate > 0.0f)
 	{
-		Growth = FullGrowth;
+		Growth = FMath::Max(FullGrowth, Growth - PlayRate * (FullGrowth / FMath::Max(SpreadDuration, 0.01f)) * DeltaTime);
 		bFinished = true;
 	}
 	else if (Growth <= 0.0f && PlayRate < 0.0f)
@@ -129,10 +151,21 @@ void UEclipseSpreadComponent::Recede()
 	SetPlayRate(-1.0f);
 }
 
+bool UEclipseSpreadComponent::NeedsTick() const
+{
+	if (PlayRate != 0.0f)
+	{
+		return true;
+	}
+	const AActor* Owner = GetOwner();
+	const USceneComponent* Root = Owner ? Owner->GetRootComponent() : nullptr;
+	return Burns.Num() > 0 && Root && Root->Mobility == EComponentMobility::Movable;
+}
+
 void UEclipseSpreadComponent::SetPlayRate(float Rate)
 {
 	PlayRate = Rate;
-	SetComponentTickEnabled(Rate != 0.0f);
+	SetComponentTickEnabled(NeedsTick());
 }
 
 void UEclipseSpreadComponent::SetGrowth(float NewGrowth)
@@ -143,7 +176,15 @@ void UEclipseSpreadComponent::SetGrowth(float NewGrowth)
 
 void UEclipseSpreadComponent::Burn(FVector WorldLocation, float Radius)
 {
-	const FVector4 Entry(WorldLocation.X, WorldLocation.Y, WorldLocation.Z, FMath::Max(Radius, 0.0f));
+	const AActor* Owner = GetOwner();
+	if (!Owner)
+	{
+		return;
+	}
+	// Kept in the actor's space, so the burn moves with it.
+	const FVector Local = Owner->GetActorTransform().InverseTransformPosition(WorldLocation);
+	const float Scale = FMath::Max(static_cast<float>(Owner->GetActorScale3D().GetAbsMax()), KINDA_SMALL_NUMBER);
+	const FVector4 Entry(Local.X, Local.Y, Local.Z, FMath::Max(Radius, 0.0f) / Scale);
 	if (Burns.Num() < MaxBurns)
 	{
 		Burns.Add(Entry);
@@ -154,6 +195,7 @@ void UEclipseSpreadComponent::Burn(FVector WorldLocation, float Radius)
 		NextBurn = (NextBurn + 1) % MaxBurns;
 	}
 	Apply();
+	SetComponentTickEnabled(NeedsTick());
 }
 
 void UEclipseSpreadComponent::ClearBurns()
@@ -170,13 +212,18 @@ float UEclipseSpreadComponent::GetInfectionAt(FVector WorldLocation, float Searc
 	{
 		return 0.0f;
 	}
+	// Everything in the actor's space, where the map and the burns live.
+	const FVector Local = Owner->GetActorTransform().InverseTransformPosition(WorldLocation);
+	const float Scale = FMath::Max(static_cast<float>(Owner->GetActorScale3D().GetAbsMax()), KINDA_SMALL_NUMBER);
+	const float LocalSoftness = BurnSoftness / Scale;
 	for (const FVector4& B : Burns)
 	{
-		if (FVector::DistSquared(FVector(B.X, B.Y, B.Z), WorldLocation) < B.W * B.W)
+		// Burned until the material shows it at least half again.
+		const float Edge = B.W + 0.5f * LocalSoftness;
+		if (FVector::DistSquared(FVector(B.X, B.Y, B.Z), Local) < Edge * Edge)
 		{
 			return 0.0f;
 		}
 	}
-	const FVector Local = Owner->GetActorTransform().InverseTransformPosition(WorldLocation);
-	return InfectionMap->InfectionAt(Local, SearchRadius, Growth);
+	return InfectionMap->InfectionAt(Local, SearchRadius / Scale, Growth - RevealMidpoint);
 }

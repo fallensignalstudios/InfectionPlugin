@@ -11,6 +11,23 @@ void UEclipseInfectionMap::SetSamples(TArray<FVector3f>&& InPoints, TArray<float
 	GridCell = 0.0f;
 }
 
+void UEclipseInfectionMap::PostLoad()
+{
+	Super::PostLoad();
+	Grid.Reset();
+	GridCell = 0.0f;
+}
+
+#if WITH_EDITOR
+void UEclipseInfectionMap::PostEditUndo()
+{
+	Super::PostEditUndo();
+	// The samples may have changed under the grid.
+	Grid.Reset();
+	GridCell = 0.0f;
+}
+#endif
+
 void UEclipseInfectionMap::BuildGridIfNeeded() const
 {
 	if (GridCell > 0.0f || Points.Num() == 0)
@@ -41,6 +58,23 @@ float UEclipseInfectionMap::InfectionAt(const FVector& ActorSpacePoint, float Ra
 	const FIntVector Hi(FMath::FloorToInt((P.X + Reach) / GridCell), FMath::FloorToInt((P.Y + Reach) / GridCell),
 		FMath::FloorToInt((P.Z + Reach) / GridCell));
 	float Best = 0.0f;
+	auto Consider = [&](int32 Index)
+	{
+		if (Points.IsValidIndex(Index) && Arrival[Index] <= Growth && FVector3f::DistSquared(Points[Index], P) <= Reach * Reach)
+		{
+			Best = FMath::Max(Best, Infection[Index]);
+		}
+	};
+	// A huge radius spans more cells than there are points: just scan them.
+	const int64 Cells = int64(Hi.X - Lo.X + 1) * int64(Hi.Y - Lo.Y + 1) * int64(Hi.Z - Lo.Z + 1);
+	if (Cells > Points.Num())
+	{
+		for (int32 Index = 0; Index < Points.Num(); ++Index)
+		{
+			Consider(Index);
+		}
+		return Best;
+	}
 	for (int32 X = Lo.X; X <= Hi.X; ++X)
 	{
 		for (int32 Y = Lo.Y; Y <= Hi.Y; ++Y)
@@ -54,10 +88,7 @@ float UEclipseInfectionMap::InfectionAt(const FVector& ActorSpacePoint, float Ra
 				}
 				for (const int32 Index : *Cell)
 				{
-					if (Arrival[Index] <= Growth && FVector3f::DistSquared(Points[Index], P) <= Reach * Reach)
-					{
-						Best = FMath::Max(Best, Infection[Index]);
-					}
+					Consider(Index);
 				}
 			}
 		}

@@ -172,6 +172,10 @@ namespace
 	{
 		UPackage* Package = CreatePackage(*(PackagePath / AssetName));
 		Package->FullyLoad();
+		if (UObject* Existing = FindObject<UObject>(Package, *AssetName); Existing && !Existing->IsA<UEclipseInfectionMap>())
+		{
+			return nullptr;  // the name is taken by something else; growth works without a map
+		}
 		UEclipseInfectionMap* Map = FindObject<UEclipseInfectionMap>(Package, *AssetName);
 		const bool bCreated = Map == nullptr;
 		if (bCreated)
@@ -201,12 +205,14 @@ namespace
 		return Map;
 	}
 
-	void PlaceSpread(AActor* Host, UEclipseInfectionMap* Map)
+	void PlaceSpread(AActor* Host, UEclipseInfectionMap* Map, float FullGrowth)
 	{
 		Host->Modify();
 		const FName Unique = MakeUniqueObjectName(Host, UEclipseSpreadComponent::StaticClass(), TEXT("EclipseSpread"));
 		UEclipseSpreadComponent* Spread = NewObject<UEclipseSpreadComponent>(Host, Unique, RF_Transactional);
 		Spread->InfectionMap = Map;
+		Spread->FullGrowth = FullGrowth;
+		Spread->Growth = FullGrowth;
 		Spread->ComponentTags.Add(GeneratedTag);
 		Host->AddInstanceComponent(Spread);
 		Spread->RegisterComponent();
@@ -405,7 +411,9 @@ namespace EclipseGrowthRunner
 				const float Spacing = 0.05f * Settings.FeatureScale;
 				UEclipseInfectionMap* Map = WriteInfectionMap(Folder / TEXT("Generated"), TEXT("IM_Eclipse_") + ObjectTools::SanitizeObjectName(Label),
 					eclipse::sampleInfection(Full, Spacing), Source.Origin, Host.Actor->GetActorTransform(), Spacing * 100.0f);
-				PlaceSpread(Host.Actor, Map);
+				// Everything grown, including veins that ran ahead of the front and the
+				// growths that appear just after their tissue, fully revealed.
+				PlaceSpread(Host.Actor, Map, 1.0f + Settings.VeinReach + 0.15f);
 			}
 			if (!bOverlay)
 			{

@@ -37,10 +37,15 @@ public:
 
 	void SetSamples(TArray<FVector3f>&& InPoints, TArray<float>&& InArrival, TArray<float>&& InInfection, float InSpacing);
 
+	virtual void PostLoad() override;
+#if WITH_EDITOR
+	virtual void PostEditUndo() override;
+#endif
+
 private:
 	void BuildGridIfNeeded() const;
 
-	// Built on first query, never saved.
+	// Built on first query, never saved; game thread only.
 	mutable TMap<FIntVector, TArray<int32>> Grid;
 	mutable float GridCell = 0.0f;
 };

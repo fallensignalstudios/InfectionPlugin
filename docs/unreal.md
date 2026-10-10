@@ -102,7 +102,7 @@ on the host and on the actors attached to it.
 
 | On the component | |
 |---|---|
-| `Growth` | How far the spread has played: 0 nothing, 1 the corruption as grown, 1.4 (`FullGrowth`) also the veins that ran ahead. |
+| `Growth` | How far the spread has played: 0 nothing, 1 the corruption as grown, `FullGrowth` (set from Vein Reach when grown, about 1.5) everything including the veins that ran ahead. |
 | `bSpreadOnBeginPlay`, `SpreadDuration` | Start from nothing when play begins and take this many seconds to finish. |
 | `StartSpread`, `Recede`, `SetPlayRate`, `SetGrowth` | Drive it from Blueprint: play forward, play backward, any speed, or jump. |
 | `OnSpreadFinished`, `OnFullyReceded` | Events at either end. |
@@ -119,6 +119,8 @@ Notes:
   shape stays visible, in the host colour, ahead of the spread.
 - `GetInfectionAt` on a character answers for its reference pose, not its
   current animation.
+- An infected actor attached under another plays its own spread; the parent's
+  component leaves it alone.
 
 ## The material
 
