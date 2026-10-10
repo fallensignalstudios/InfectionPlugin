@@ -1,5 +1,7 @@
 #pragma once
 
+#include "eclipse/api.h"
+
 #include <cstdint>
 #include <vector>
 
@@ -56,15 +58,15 @@ struct Growth {
     GrowthStats stats;
 };
 
-Growth grow(const Mesh& host, const std::vector<Vec3>& seeds, const GrowthParams& params,
+ECLIPSECORE_API Growth grow(const Mesh& host, const std::vector<Vec3>& seeds, const GrowthParams& params,
             const FeatureParams& features);
 
 // Is p inside the closed surface, judged from the nearest vertex's normal?
 // Cheap and good enough to keep growths from passing through a body.
 class InsideTest {
 public:
-    explicit InsideTest(const Mesh& surface, float searchRadius);
-    bool inside(const Vec3& p) const;
+    explicit ECLIPSECORE_API InsideTest(const Mesh& surface, float searchRadius);
+    ECLIPSECORE_API bool inside(const Vec3& p) const;
 
 private:
     const Mesh& surface_;

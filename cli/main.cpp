@@ -37,6 +37,9 @@ void usage() {
         "  --obj                  also write OBJ files\n"
         "  --feature-scale F      size of spikes, nodules, strands and membranes (default 1, corridor 2)\n"
         "  --no-growths           corrupt the surface only\n"
+        "  --overlay              export only the corrupted shell, to lay over the untouched host\n"
+        "  --weld METRES          OBJ hosts: merge vertices this close (default 0.0001)\n"
+        "  --max-edge METRES      OBJ hosts: subdivide until no edge is longer (try 0.01)\n"
         "  --no-preview           skip the PNG previews\n");
 }
 
@@ -80,7 +83,8 @@ int main(int argc, char** argv) {
     params.coverage = 0.45f;
     std::vector<float> stages;
     std::vector<Vec3> seeds;
-    bool preview = true, obj = false, plateSizeGiven = false, scaleGiven = false;
+    bool preview = true, obj = false, plateSizeGiven = false, scaleGiven = false, overlay = false;
+    float weld = 1e-4f, maxEdge = 0.0f;
     FeatureParams features;
 
     for (int i = 1; i < argc; ++i) {
@@ -106,6 +110,9 @@ int main(int argc, char** argv) {
         else if (a == "--obj") obj = true;
         else if (a == "--no-preview") preview = false;
         else if (a == "--no-growths") features.enabled = false;
+        else if (a == "--overlay") overlay = true;
+        else if (a == "--weld") weld = std::strtof(next().c_str(), nullptr);
+        else if (a == "--max-edge") maxEdge = std::strtof(next().c_str(), nullptr);
         else if (a == "--feature-scale") {
             features.scale = std::strtof(next().c_str(), nullptr);
             scaleGiven = true;
@@ -143,6 +150,15 @@ int main(int argc, char** argv) {
             return 1;
         }
         hostName = std::filesystem::path(hostArg).stem().string();
+        weldVertices(host, weld);
+        if (maxEdge > 0.0f) {
+            if (!subdivideToEdgeLength(host, maxEdge, 4000000)) {
+                std::fprintf(stderr, "--max-edge %.4f would need more than 4M vertices; use a larger value\n", maxEdge);
+                return 1;
+            }
+        } else {
+            host.computeNormals();
+        }
         if (seeds.empty()) {
             Vec3 lo, hi;
             host.bounds(lo, hi);
@@ -163,7 +179,11 @@ int main(int argc, char** argv) {
         std::snprintf(tag, sizeof tag, "%s_s%u_c%03d", hostName.c_str(), p.seed, static_cast<int>(p.coverage * 100 + 0.5f));
         std::string base = (std::filesystem::path(outDir) / tag).string();
         std::string err;
-        if (!writeGlb(base + ".glb", {{"EclipseSurface", &g.surface}, {"EclipseGrowths", &g.growths}}, &err)) {
+        Mesh shell;
+        if (overlay) shell = extractShell(g.surface, 0.0015f);
+        const Mesh& exported = overlay ? shell : g.surface;
+        if (!writeGlb(base + ".glb", {{overlay ? "EclipseShell" : "EclipseSurface", &exported}, {"EclipseGrowths", &g.growths}},
+                      &err)) {
             std::fprintf(stderr, "%s\n", err.c_str());
             return 1;
         }

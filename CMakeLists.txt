@@ -9,6 +9,10 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 option(ECLIPSE_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
+# Builds the core as a shared library that exports only what is marked
+# ECLIPSECORE_API, the way Unreal's editor builds the EclipseCore module, so a
+# missing export fails here instead of at the plugin's link step.
+option(ECLIPSE_SHARED_CORE "Build the core as a shared library with hidden symbols" OFF)
 
 function(eclipse_warnings target)
   if(MSVC)
@@ -26,21 +30,37 @@ function(eclipse_warnings target)
   endif()
 endfunction()
 
-# The core has no dependency beyond the standard library, so the same sources
-# build inside the Unreal plugin.
-add_library(eclipse_core STATIC
-  core/src/corruption.cpp
-  core/src/export.cpp
-  core/src/geometry.cpp
-  core/src/growths.cpp
-  core/src/hosts.cpp
-  core/src/mesh.cpp
-  core/src/noise.cpp
-  core/src/preview.cpp
-  core/src/sdf.cpp
-  core/src/spatial.cpp
+# The core has no dependency beyond the standard library. Its sources live in
+# the Unreal plugin's EclipseCore module so there is exactly one copy; this
+# project builds them on their own for the CLI and the tests.
+if(ECLIPSE_SHARED_CORE)
+  set(ECLIPSE_CORE_KIND SHARED)
+else()
+  set(ECLIPSE_CORE_KIND STATIC)
+endif()
+add_library(eclipse_core ${ECLIPSE_CORE_KIND}
+  Source/EclipseCore/Private/corruption.cpp
+  Source/EclipseCore/Private/export.cpp
+  Source/EclipseCore/Private/geometry.cpp
+  Source/EclipseCore/Private/growths.cpp
+  Source/EclipseCore/Private/hosts.cpp
+  Source/EclipseCore/Private/mesh.cpp
+  Source/EclipseCore/Private/noise.cpp
+  Source/EclipseCore/Private/preview.cpp
+  Source/EclipseCore/Private/sdf.cpp
+  Source/EclipseCore/Private/spatial.cpp
 )
-target_include_directories(eclipse_core PUBLIC core/include)
+target_include_directories(eclipse_core PUBLIC Source/EclipseCore/Public)
+if(ECLIPSE_SHARED_CORE)
+  set_target_properties(eclipse_core PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON
+                                                WINDOWS_EXPORT_ALL_SYMBOLS OFF)
+  if(MSVC)
+    target_compile_definitions(eclipse_core PRIVATE "ECLIPSECORE_API=__declspec(dllexport)"
+                                            INTERFACE "ECLIPSECORE_API=__declspec(dllimport)")
+  else()
+    target_compile_definitions(eclipse_core PUBLIC "ECLIPSECORE_API=__attribute__((visibility(\"default\")))")
+  endif()
+endif()
 eclipse_warnings(eclipse_core)
 
 add_executable(eclipse-cli cli/main.cpp)

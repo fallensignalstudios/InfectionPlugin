@@ -9,12 +9,16 @@ Engine 5.8.
 
 ![Growth stages on the test mannequin](docs/previews/mannequin_stages.jpg)
 
-The core is standard C++20 with no third-party dependency, so the same code
-builds into the command-line tool, the tests and (next) the Unreal editor plugin.
+This repository is an **Unreal Engine 5.8 plugin**: clone it into a project's
+`Plugins` folder and grow corruption over meshes in the level from
+**Tools → Eclipse Growth**. See [docs/unreal.md](docs/unreal.md).
+
+The generator at its heart is standard C++20 with no third-party dependency, so
+the same sources build into the plugin, a command-line tool and the tests.
 Every growth is deterministic: the same host, seed and settings always produce
 the same mesh, on any compiler.
 
-## Build and test
+## Build and test the generator
 
 You need a C++20 compiler (MSVC 2022, GCC 12+ or Clang 15+) and CMake 3.20 or newer.
 
@@ -39,8 +43,9 @@ eclipse-cli --host mannequin --stages 0.15,0.35,0.6,0.9 --out out
 # An environment: a corridor corner, creeping upward
 eclipse-cli --host corridor --cell 0.012 --coverage 0.6 --gravity 0.3 --out out
 
-# Your own mesh (OBJ), starting where you choose
-eclipse-cli --host my_room.obj --seed-at 1.2,0,-3.5 --seed-at 4,0,2 --coverage 0.4 --out out
+# Your own mesh (OBJ), subdivided to 1 cm, starting where you choose,
+# exporting only the corrupted shell to lay over the original
+eclipse-cli --host my_room.obj --max-edge 0.01 --seed-at 1.2,0,-3.5 --seed-at 4,0,2 --overlay --out out
 ```
 
 Each run writes a `.glb` per stage and a PNG look-dev preview rendered by the
@@ -100,8 +105,12 @@ glTF uses +Y up and metres. Unreal's glTF importer converts to +Z up and centime
 ## Layout
 
 ```
-core/      the generator library (include/eclipse, src)
-cli/       eclipse-cli
-tests/     self-contained test runner (no framework)
-docs/      design notes, references and previews
+InfectionPlugin.uplugin   the plugin descriptor
+Source/EclipseCore/       the generator (Public/eclipse, Private): plain C++, no engine headers
+Source/InfectionRuntime/  the Eclipse Seed actor
+Source/InfectionEditor/   the Eclipse Growth panel, mesh conversion, assets and materials
+Resources/                plugin icon
+cli/                      eclipse-cli
+tests/                    self-contained test runner (no framework)
+docs/                     design notes, references and previews
 ```

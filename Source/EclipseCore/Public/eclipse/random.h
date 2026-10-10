@@ -1,5 +1,7 @@
 #pragma once
 
+#include "eclipse/api.h"
+
 #include <cstdint>
 
 #include "eclipse/math.h"
@@ -51,10 +53,10 @@ class Noise {
 public:
     explicit Noise(uint32_t seed) : seed_(seed) {}
 
-    float value(const Vec3& p) const;
-    float fbm(const Vec3& p, int octaves, float lacunarity = 2.0f, float gain = 0.5f) const;
+    ECLIPSECORE_API float value(const Vec3& p) const;
+    ECLIPSECORE_API float fbm(const Vec3& p, int octaves, float lacunarity = 2.0f, float gain = 0.5f) const;
     // Sharp ridges where the noise crosses zero; in [0, 1].
-    float ridged(const Vec3& p, int octaves) const;
+    ECLIPSECORE_API float ridged(const Vec3& p, int octaves) const;
 
 private:
     Vec3 gradient(int x, int y, int z) const;

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "eclipse/api.h"
+
 #include <cmath>
 #include <vector>
 
@@ -11,7 +13,7 @@ namespace eclipse {
 // twists. Each point carries its own radius and corruption attributes. A
 // zero radius at the last point closes the tube to a sharp tip; otherwise
 // both ends are capped flat. The target mesh must carry attributes.
-void appendTube(Mesh& mesh, const std::vector<Vec3>& points, const std::vector<float>& radii,
+ECLIPSECORE_API void appendTube(Mesh& mesh, const std::vector<Vec3>& points, const std::vector<float>& radii,
                 const std::vector<CorruptionAttributes>& attributes, int sides);
 
 // An ellipsoid with semi-axes along a right-handed frame (x, y, z). The
@@ -21,7 +23,7 @@ void appendEllipsoid(Mesh& mesh, const Vec3& centre, const Vec3& axisX, const Ve
                      const Vec3& radii, int rings, int segments, AttributeFn attributeOf);
 
 // Evenly spaced samples of a quadratic Bezier curve.
-std::vector<Vec3> sampleQuadratic(const Vec3& a, const Vec3& control, const Vec3& b, int samples);
+ECLIPSECORE_API std::vector<Vec3> sampleQuadratic(const Vec3& a, const Vec3& control, const Vec3& b, int samples);
 
 // ---------------------------------------------------------------------------
 

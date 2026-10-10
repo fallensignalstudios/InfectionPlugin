@@ -26,11 +26,16 @@ where the host's own outline tears into hanging fringe. The strands thicken
 toward that look at high coverage, but tearing the host surface itself is a
 later step.
 
-## Phase 3: Unreal Engine 5.8 plugin
+## Phase 3: Unreal Engine 5.8 plugin (written, not yet compiled against the engine)
 
-- Editor plugin compiling this core directly: pick a static mesh, place seeds in the viewport, set the sliders, generate.
-- Writes `UStaticMesh` assets with Nanite enabled; no export or import step.
-- `M_EclipseBiomass` master material: clear-coat carapace, subsurface violet, vein and seam emission, a pulse, and a growth parameter driven by the arrival channel.
+- The repository is the plugin. `EclipseCore` compiles the generator sources directly; one copy serves the plugin, CLI and tests.
+- **Eclipse Growth** panel (Tools menu): every setting in editor units, remembered per project; Grow on Selected, Add Seed, Rebuild Materials.
+- **Eclipse Seed** actor marks where corruption starts; editor-only.
+- Hosts are read from the static mesh's source geometry in world space, welded across seams and subdivided to a target resolution.
+- **Overlay** output (a corrupted shell over the untouched host, which keeps its materials) or **Replace** output.
+- Static mesh assets written with Nanite on, attached to the host and replaced on each grow; undoable placement.
+- `M_EclipseBiomass` built in code: clear-coat carapace, inflamed front, pulsing violet glow, and a `Growth` parameter that replays the spread.
+- In the core: vertex welding, crack-free adaptive subdivision and shell extraction, each tested; `--overlay`, `--weld` and `--max-edge` on the CLI.
 
 ## Phase 4: skeletal hosts
 

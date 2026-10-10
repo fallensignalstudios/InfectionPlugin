@@ -1,0 +1,29 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "0.3.0",
+	"FriendlyName": "Infection (Eclipse Biomass)",
+	"Description": "Grows procedural Eclipse corruption - carapace, glowing veins, thorns, eyes, strands and torn membranes - over static meshes in the level.",
+	"Category": "Procedural",
+	"CreatedBy": "Fallen Signal Studios",
+	"CanContainContent": true,
+	"IsBetaVersion": true,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "EclipseCore",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "InfectionRuntime",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "InfectionEditor",
+			"Type": "Editor",
+			"LoadingPhase": "PostEngineInit"
+		}
+	]
+}

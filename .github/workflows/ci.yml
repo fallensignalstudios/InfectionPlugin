@@ -13,23 +13,40 @@ jobs:
           - name: windows-msvc
             os: windows-latest
             werror: "OFF"
+            shared: "OFF"
+          # The core as a DLL exporting only ECLIPSECORE_API symbols, as the
+          # Unreal editor builds it: catches a missing export before UE does.
+          - name: windows-msvc-dll
+            os: windows-latest
+            werror: "OFF"
+            shared: "ON"
+          - name: linux-gcc-shared
+            os: ubuntu-latest
+            cxx: g++
+            werror: "ON"
+            shared: "ON"
           - name: linux-gcc
             os: ubuntu-latest
             cxx: g++
             werror: "ON"
+            shared: "OFF"
           - name: linux-clang
             os: ubuntu-latest
             cxx: clang++
             werror: "ON"
+            shared: "OFF"
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - name: Plugin descriptor parses
+        shell: bash
+        run: python3 -c "import json; json.load(open('InfectionPlugin.uplugin'))" || python -c "import json; json.load(open('InfectionPlugin.uplugin'))"
       - name: Configure
         shell: bash
         run: |
           if [ -n "${{ matrix.cxx }}" ]; then export CXX=${{ matrix.cxx }}; fi
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DECLIPSE_WARNINGS_AS_ERRORS=${{ matrix.werror }}
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DECLIPSE_WARNINGS_AS_ERRORS=${{ matrix.werror }} -DECLIPSE_SHARED_CORE=${{ matrix.shared }}
       - name: Build
         run: cmake --build build --config Release --parallel
       - name: Test

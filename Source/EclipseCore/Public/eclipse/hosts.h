@@ -1,5 +1,7 @@
 #pragma once
 
+#include "eclipse/api.h"
+
 #include <string>
 #include <vector>
 
@@ -17,11 +19,11 @@ struct BuiltinHost {
 };
 
 // A neutral humanoid in T-pose, about 1.8 m tall.
-SdfModel mannequinModel();
+ECLIPSECORE_API SdfModel mannequinModel();
 // A corner of a corridor: floor, two walls, a pipe run, a crate and a column.
-SdfModel corridorModel();
+ECLIPSECORE_API SdfModel corridorModel();
 
-BuiltinHost makeBuiltinHost(const std::string& name, float cellSize);
-std::vector<std::string> builtinHostNames();
+ECLIPSECORE_API BuiltinHost makeBuiltinHost(const std::string& name, float cellSize);
+ECLIPSECORE_API std::vector<std::string> builtinHostNames();
 
 }  // namespace eclipse

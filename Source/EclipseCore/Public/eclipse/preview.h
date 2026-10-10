@@ -1,5 +1,7 @@
 #pragma once
 
+#include "eclipse/api.h"
+
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -25,8 +27,8 @@ struct PreviewOptions {
 // Software-rendered look-dev preview approximating the Eclipse material:
 // glossy black carapace, pale host tissue, violet emissive veins and cracks.
 // Lets growth be judged without opening the engine.
-Image renderPreview(const Mesh& mesh, const PreviewOptions& options);
+ECLIPSECORE_API Image renderPreview(const Mesh& mesh, const PreviewOptions& options);
 
-bool writePng(const std::string& path, const Image& image);
+ECLIPSECORE_API bool writePng(const std::string& path, const Image& image);
 
 }  // namespace eclipse
