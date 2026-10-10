@@ -39,6 +39,7 @@ void usage() {
         "  --feature-scale F      size of spikes, nodules, strands and membranes (default 1, corridor 2)\n"
         "  --no-growths           corrupt the surface only\n"
         "  --fusion F             how much tissue swells around growths (default 1, 0 off)\n"
+        "  --roughness F          how knotted and lumpy growths are (default 1, 0 smooth)\n"
         "  --overlay              export only the corrupted shell, to lay over the untouched host\n"
         "  --weld METRES          OBJ hosts: merge vertices this close (default 0.0001)\n"
         "  --max-edge METRES      OBJ hosts: subdivide until no edge is longer (try 0.01)\n"
@@ -162,6 +163,7 @@ int main(int argc, char** argv) {
         else if (a == "--detail-maps") detailMaps = true;
         else if (a == "--no-growths") features.enabled = false;
         else if (a == "--fusion") features.fusion = std::strtof(next().c_str(), nullptr);
+        else if (a == "--roughness") features.roughness = std::strtof(next().c_str(), nullptr);
         else if (a == "--overlay") overlay = true;
         else if (a == "--weld") weld = std::strtof(next().c_str(), nullptr);
         else if (a == "--max-edge") maxEdge = std::strtof(next().c_str(), nullptr);
@@ -258,9 +260,9 @@ int main(int argc, char** argv) {
         if (obj) writeObj(base + ".obj", grown);
         std::printf("  coverage %.2f -> %s.glb (hash %016llx)\n", p.coverage, base.c_str(),
                     static_cast<unsigned long long>(meshHash(grown)));
-        std::printf("    %zu roots, %zu vein tubes, %zu horns, %zu hearts (%zu maws), %zu vertebrae, %zu nodules, "
+        std::printf("    %zu roots (%zu rootlets), %zu vein tubes, %zu horns (%zu barbs), %zu hearts (%zu maws), %zu vertebrae, %zu nodules, "
                     "%zu sac clusters, %zu strands, %zu bridges, %zu membranes; %zu growth + %zu flesh triangles\n",
-                    g.stats.tendrils, g.stats.veinTubes, g.stats.spikes, g.stats.hearts, g.stats.maws,
+                    g.stats.tendrils, g.stats.rootlets, g.stats.veinTubes, g.stats.spikes, g.stats.barbs, g.stats.hearts, g.stats.maws,
                     g.stats.vertebrae, g.stats.nodules, g.stats.sacs, g.stats.strands, g.stats.bridges,
                     g.stats.membranes, g.growths.triangleCount(), g.flesh.triangleCount());
         if (preview) {

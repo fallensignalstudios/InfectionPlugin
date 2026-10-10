@@ -22,6 +22,10 @@ struct FeatureParams {
     // grows out of the surface instead of sitting on it. 0 turns it off.
     float fusion = 1.0f;
 
+    // How knotted, ringed and lumpy growths are, 0 (smooth, round) to about
+    // 2. Organic growth is never perfectly round.
+    float roughness = 1.0f;
+
     bool veinTubes = true;
     float veinTubeMinRadius = 0.0015f;  // thinner veins stay painted only
 
@@ -30,6 +34,7 @@ struct FeatureParams {
     float spikeSpacing = 0.06f;
     float spikeLength = 0.075f;         // a typical horn; giants reach about six times this
     float spikeSweep = 0.85f;           // how far horns lean along the growth direction
+    int spikeBarbs = 5;                 // small thorns along a big horn's outer curve
 
     // Roots: ropes laid over the surface that run in toward the cores,
     // thickening as they go, and twist so they spiral around limbs and columns.
@@ -39,6 +44,7 @@ struct FeatureParams {
     float tendrilRadius = 0.016f;
     float tendrilTwist = 0.5f;          // radians off the straight path
     float tendrilDensity = 0.7f;        // share of possible roots that grow
+    float tendrilBranching = 0.35f;     // chance of a side rootlet every ~5 cm
 
     // Hearts: a glowing orb at each seed, gripped by a ring of claws; past
     // mawCoverage it opens into a maw: a crater of swollen lips around a
@@ -80,7 +86,7 @@ struct FeatureParams {
 struct GrowthStats {
     size_t veinTubes = 0, spikes = 0, nodules = 0, strands = 0, bridges = 0, membranes = 0;
     size_t tendrils = 0, hearts = 0, vertebrae = 0;
-    size_t maws = 0, sacs = 0;
+    size_t maws = 0, sacs = 0, barbs = 0, rootlets = 0;
 };
 
 // Everything one growth produced. `surface` is the host, displaced and

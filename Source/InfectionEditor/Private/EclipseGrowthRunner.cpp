@@ -125,6 +125,9 @@ namespace
 		F.mawCoverage = S.MawCoverage;
 		F.vertebrae = S.bVertebrae;
 		F.fusion = S.Fusion;
+		F.roughness = S.Roughness;
+		F.tendrilBranching = S.RootBranching;
+		F.spikeBarbs = S.HornBarbs;
 		F.sacs = S.bSacs;
 		F.sacChance = S.SacChance;
 		return F;

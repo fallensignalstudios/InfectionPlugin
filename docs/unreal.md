@@ -70,7 +70,11 @@ Vertices that are split along UV or smoothing seams are welded first, so the
 spread crosses those seams. Generated meshes have Nanite enabled by default.
 
 **Fusion** (Growths) sets how much the tissue swells up around each growth's
-base; 0 leaves growths sitting on the surface. **Sacs** and **Sac Chance**
+base; 0 leaves growths sitting on the surface. **Roughness** sets how knotted,
+ringed and lumpy growths are; 0 makes them smooth and round and about halves
+their triangles, worth it on skinned characters without Nanite. **Root
+Branching** and **Horn Barbs** control the side rootlets and the hooked thorns
+on big horns. **Sacs** and **Sac Chance**
 control the pod clusters that gather in folds and corners.
 
 ## Characters (skeletal meshes)
@@ -199,7 +203,7 @@ Editor, Game Development and Game Shipping builds have passed with precompiled
 headers and unity builds disabled (`-NoPCH -NoSharedPCH -DisableUnity`, the
 flags used by `BuildPlugin -StrictIncludes`), with the 35 standalone tests and
 six Unreal automation tests passing, as of the live-spread fixes. The realism
-pass adds standalone tests (39 now) and a materials automation test; its
+pass adds standalone tests (40 now) and a materials automation test; its
 engine side awaits the same build. Run all Unreal tests with
 `Automation RunTests Infection`: they check skeletal corruption-channel bytes,
 skeletal regeneration after host changes, sparse-map queries, and live-spread

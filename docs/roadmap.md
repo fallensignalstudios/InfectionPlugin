@@ -65,6 +65,8 @@ Next on characters: strands that swing (physics or AnimDynamics), carrying morph
 - **Sac clusters** in folds and corners.
 - **Detail maps** generated in code (chitin scales and striations, flesh folds and pores), tiled triplanar over the bind pose so they stay put on animated characters; cavity darkening; raw tissue in the seams.
 - The seed's core light no longer smears along creases.
+- **Organic shapes**: knotted roots and beaded strands, unevenly ringed horns and claws, lumpy sacs, orbs and vertebrae (one Roughness setting); tubes resample themselves so the detail never aliases.
+- **Branching**: rootlets fork off the roots; big horns carry hooked barbs.
 
 Not done here: Nanite displacement (true silhouette detail from the maps). It needs per-project tessellation settings and an in-engine test; the detail is in the normals for now.
 

@@ -476,6 +476,44 @@ TEST(tubes_are_closed_and_face_outward) {
     }
 }
 
+TEST(styled_tubes_stay_closed_and_vary_their_radius) {
+    // Knots and growth rings reshape a tube (resampling it finely enough to
+    // show them) without opening it, flipping it or blunting a sharp tip.
+    std::vector<Vec3> pts;
+    std::vector<float> radii;
+    for (int i = 0; i < 6; ++i) {
+        pts.push_back({0.05f * std::sin(i * 0.5f), 0.06f * i, 0});
+        radii.push_back(i == 5 ? 0.0f : 0.02f * (1.0f - 0.18f * i));
+    }
+    Mesh plain, styled;
+    appendTube(plain, pts, radii, std::vector<CorruptionAttributes>(pts.size()), 10);
+    TubeStyle style;
+    style.lumps = 0.3f;
+    style.lumpSize = 0.02f;
+    style.rings = 0.1f;
+    style.ringSpacing = 0.015f;
+    appendTube(styled, pts, radii, std::vector<CorruptionAttributes>(pts.size()), 10, true, style);
+    CHECK(styled.vertexCount() > 3 * plain.vertexCount());  // resampled along its length
+    CHECK(brokenEdges(styled) == 0);
+    CHECK(signedVolume(styled) > 0);
+    // The tip is still a point, at the same place.
+    float tipGap = 1e9f;
+    for (const Vec3& q : styled.positions) tipGap = std::min(tipGap, length(q - pts.back()));
+    CHECK(tipGap < 1e-5f);
+    // The surface is no longer a constant distance from its axis.
+    float lo = 1e9f, hi = 0.0f;
+    for (const Vec3& q : styled.positions)
+        if (std::fabs(q.y - 0.06f) < 0.004f) {  // a slice near the base, where the radius is ~2 cm
+            float r = std::sqrt((q.x - 0.05f * std::sin(0.5f)) * (q.x - 0.05f * std::sin(0.5f)) + q.z * q.z);
+            lo = std::min(lo, r);
+            hi = std::max(hi, r);
+        }
+    CHECK(hi - lo > 0.002f);
+    bool unit = true;
+    for (const Vec3& n : styled.normals) unit = unit && std::fabs(length(n) - 1.0f) < 1e-3f;
+    CHECK(unit);
+}
+
 TEST(ellipsoids_are_closed_with_the_right_volume) {
     Mesh m;
     appendEllipsoid(m, {1, 2, 3}, {1, 0, 0}, {0, 1, 0}, {0, 0, 1}, {0.3f, 0.2f, 0.1f}, 24, 48,
@@ -513,6 +551,8 @@ TEST(growths_sprout_every_feature) {
     }
     CHECK(membranes > 0);
     CHECK(g.stats.tendrils > 20);
+    CHECK(g.stats.rootlets > 20);
+    CHECK(g.stats.barbs > 0);
     CHECK(g.stats.hearts == mannequin().defaultSeeds.size());
     CHECK(g.stats.vertebrae > 0);
     CHECK(g.growths.attributes.size() == g.growths.vertexCount());

@@ -94,6 +94,11 @@ public:
 	UPROPERTY(EditAnywhere, Config, Category = "Growths", meta = (ClampMin = "0", ClampMax = "3", EditCondition = "bGrowths"))
 	float Fusion = 1.0f;
 
+	// How knotted, ringed and lumpy growths are; 0 makes them smooth and
+	// round, and about halves their triangle count.
+	UPROPERTY(EditAnywhere, Config, Category = "Growths", meta = (ClampMin = "0", ClampMax = "2", EditCondition = "bGrowths"))
+	float Roughness = 1.0f;
+
 	UPROPERTY(EditAnywhere, Config, Category = "Growths", meta = (EditCondition = "bGrowths"))
 	bool bVeinTubes = true;
 
@@ -106,6 +111,10 @@ public:
 
 	UPROPERTY(EditAnywhere, Config, Category = "Growths", meta = (ClampMin = "1", ClampMax = "300", Units = "cm", EditCondition = "bGrowths && bRoots"))
 	float RootLength = 30.0f;
+
+	// Chance of a thinner side root forking off every few centimetres.
+	UPROPERTY(EditAnywhere, Config, Category = "Growths", meta = (ClampMin = "0", ClampMax = "1", EditCondition = "bGrowths && bRoots"))
+	float RootBranching = 0.35f;
 
 	// A glowing orb gripped by claws at each seed.
 	UPROPERTY(EditAnywhere, Config, Category = "Growths", meta = (EditCondition = "bGrowths"))
@@ -133,6 +142,10 @@ public:
 	// A typical horn; a rare few grow several times longer.
 	UPROPERTY(EditAnywhere, Config, Category = "Growths", meta = (ClampMin = "0", ClampMax = "50", Units = "cm", EditCondition = "bGrowths"))
 	float ThornLength = 7.5f;
+
+	// Small hooked thorns along each big horn.
+	UPROPERTY(EditAnywhere, Config, Category = "Growths", meta = (ClampMin = "0", ClampMax = "12", EditCondition = "bGrowths"))
+	int32 HornBarbs = 5;
 
 	UPROPERTY(EditAnywhere, Config, Category = "Growths", meta = (ClampMin = "0.5", ClampMax = "100", Units = "cm", EditCondition = "bGrowths"))
 	float ThornSpacing = 6.0f;
