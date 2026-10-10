@@ -1,9 +1,11 @@
 #include "eclipse/mesh.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <limits>
 #include <queue>
 #include <sstream>
 #include <unordered_map>
@@ -142,28 +144,60 @@ void weldVertices(Mesh& mesh, float tolerance, std::vector<uint32_t>* remapOut) 
 
 bool subdivideToEdgeLength(Mesh& mesh, float maxEdge, size_t maxVertices,
                            std::vector<std::array<uint32_t, 2>>* parentsOut) {
-    if (maxEdge <= 0.0f) return false;
+    if (!std::isfinite(maxEdge) || maxEdge <= 0.0f) return false;
+    // Mesh indices and adjacency entries are uint32_t, even on 64-bit hosts.
+    const size_t indexLimit = std::numeric_limits<uint32_t>::max();
+    maxVertices = std::min(maxVertices, indexLimit);
+    if (mesh.positions.size() > maxVertices || mesh.triangles.size() > indexLimit) return false;
+    for (const auto& p : mesh.positions)
+        if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z)) return false;
     auto edgeKey = [](uint32_t a, uint32_t b) {
         return a < b ? (static_cast<uint64_t>(a) << 32) | b : (static_cast<uint64_t>(b) << 32) | a;
     };
-    // Estimate first, so an absurd request fails fast instead of eating memory:
-    // each long edge of length L becomes about L/maxEdge pieces, and a
-    // triangle's vertex count grows with the square of that.
-    double estimate = static_cast<double>(mesh.positions.size());
-    for (const auto& t : mesh.triangles) {
-        float l = std::max({length(mesh.positions[t[1]] - mesh.positions[t[0]]),
-                            length(mesh.positions[t[2]] - mesh.positions[t[1]]),
-                            length(mesh.positions[t[0]] - mesh.positions[t[2]])});
-        double k = std::ceil(l / maxEdge);
-        estimate += 0.5 * k * k;
+    // Use the same metric for the lower bound and the actual split decisions.
+    // Promoting before subtraction also avoids float overflow/underflow for
+    // otherwise finite coordinates and very small requested edge lengths.
+    auto edgeLength = [](const Vec3& a, const Vec3& b) {
+        const double x = static_cast<double>(a.x) - b.x;
+        const double y = static_cast<double>(a.y) - b.y;
+        const double z = static_cast<double>(a.z) - b.z;
+        return std::sqrt(x * x + y * y + z * z);
+    };
+    std::unordered_map<uint64_t, std::vector<uint32_t>> edgeTriangles;
+    auto addEdge = [&](uint32_t a, uint32_t b, uint32_t t) { edgeTriangles[edgeKey(a, b)].push_back(t); };
+    // Each distinct original edge of length L needs at least
+    // ceil(L / maxEdge) - 1 new vertices along its eventual chain. Shared
+    // indexed edges count once, and subdivision never merges those chains.
+    // This is a lower bound, unlike squaring a triangle's longest edge, which
+    // wrongly rejects long thin trim. A small downward allowance keeps the
+    // bound conservative at integer ratios despite double distance rounding.
+    size_t remaining = maxVertices - mesh.positions.size();
+    constexpr double roundoff = 16.0 * std::numeric_limits<double>::epsilon();
+    for (uint32_t t = 0; t < mesh.triangles.size(); ++t) {
+        const auto& tri = mesh.triangles[t];
+        if (tri[0] >= mesh.positions.size() || tri[1] >= mesh.positions.size() || tri[2] >= mesh.positions.size() ||
+            tri[0] == tri[1] || tri[1] == tri[2] || tri[2] == tri[0]) return false;
+        for (int i = 0; i < 3; ++i) {
+            const uint32_t a = tri[i], b = tri[(i + 1) % 3];
+            auto [it, inserted] = edgeTriangles.try_emplace(edgeKey(a, b));
+            if (inserted) {
+                const double l = edgeLength(mesh.positions[a], mesh.positions[b]);
+                if (!std::isfinite(l)) return false;
+                if (l > maxEdge) {
+                    const double required = std::ceil((l / maxEdge) * (1.0 - roundoff)) - 1.0;
+                    // Compare before converting to size_t, and subtract from
+                    // the remaining budget so even absurd ratios cannot wrap.
+                    if (!std::isfinite(required) || required > static_cast<double>(remaining)) return false;
+                    if (required > 0.0) remaining -= static_cast<size_t>(required);
+                }
+            }
+            it->second.push_back(t);
+        }
     }
-    if (estimate > static_cast<double>(maxVertices)) return false;
 
     std::vector<Vec3> positions = mesh.positions;
     std::vector<std::array<uint32_t, 3>> triangles = mesh.triangles;
     std::vector<std::array<uint32_t, 2>> parents;
-    std::unordered_map<uint64_t, std::vector<uint32_t>> edgeTriangles;
-    auto addEdge = [&](uint32_t a, uint32_t b, uint32_t t) { edgeTriangles[edgeKey(a, b)].push_back(t); };
     auto removeEdgeTriangle = [&](uint32_t a, uint32_t b, uint32_t t) {
         auto it = edgeTriangles.find(edgeKey(a, b));
         if (it == edgeTriangles.end()) return;
@@ -171,14 +205,11 @@ bool subdivideToEdgeLength(Mesh& mesh, float maxEdge, size_t maxVertices,
         list.erase(std::remove(list.begin(), list.end(), t), list.end());
         if (list.empty()) edgeTriangles.erase(it);
     };
-    for (uint32_t t = 0; t < triangles.size(); ++t)
-        for (int i = 0; i < 3; ++i) addEdge(triangles[t][i], triangles[t][(i + 1) % 3], t);
-
     // Longest edge first keeps the triangles well shaped.
-    using Item = std::pair<float, uint64_t>;
+    using Item = std::pair<double, uint64_t>;
     std::priority_queue<Item> queue;
     auto consider = [&](uint32_t a, uint32_t b) {
-        float l = length(positions[a] - positions[b]);
+        double l = edgeLength(positions[a], positions[b]);
         if (l > maxEdge) queue.push({l, edgeKey(a, b)});
     };
     for (const auto& [k, list] : edgeTriangles) consider(static_cast<uint32_t>(k >> 32), static_cast<uint32_t>(k));
@@ -191,7 +222,7 @@ bool subdivideToEdgeLength(Mesh& mesh, float maxEdge, size_t maxVertices,
         const uint32_t a = static_cast<uint32_t>(k >> 32), b = static_cast<uint32_t>(k);
         if (positions.size() >= maxVertices) return false;
         const uint32_t m = static_cast<uint32_t>(positions.size());
-        positions.push_back((positions[a] + positions[b]) * 0.5f);
+        positions.push_back(positions[a] * 0.5f + positions[b] * 0.5f);
         parents.push_back({a, b});
         std::vector<uint32_t> touching = it->second;
         edgeTriangles.erase(it);
@@ -201,6 +232,7 @@ bool subdivideToEdgeLength(Mesh& mesh, float maxEdge, size_t maxVertices,
             while (!((tri[0] == a && tri[1] == b) || (tri[0] == b && tri[1] == a)))
                 tri = {tri[1], tri[2], tri[0]};
             const uint32_t p = tri[0], q = tri[1], r = tri[2];
+            if (triangles.size() >= indexLimit) return false;
             const uint32_t added = static_cast<uint32_t>(triangles.size());
             triangles[t] = {p, m, r};
             triangles.push_back({m, q, r});

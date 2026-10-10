@@ -9,6 +9,7 @@
 #include <fstream>
 #include <functional>
 #include <iterator>
+#include <limits>
 #include <map>
 #include <stdexcept>
 #include <system_error>
@@ -779,6 +780,128 @@ TEST(subdivision_refuses_an_oversized_result) {
     Mesh before = m;
     CHECK(!subdivideToEdgeLength(m, 0.001f, 100000));
     CHECK(m.positions.size() == before.positions.size() && m.triangles == before.triangles);
+}
+
+TEST(subdivision_accepts_long_thin_surfaces_within_the_actual_cap) {
+    // Ornament and wall trim are long, narrow surfaces, not square patches.
+    // The old per-triangle longest-edge-squared estimate rejects this strip
+    // at 1024 vertices even though adaptive splitting needs far fewer.
+    Mesh m = splitCube();
+    weldVertices(m, 1e-4f);
+    for (auto& p : m.positions) {
+        p.x *= 32.0f;
+        p.y *= 0.03125f;
+        p.z *= 0.03125f;
+    }
+    const size_t originalVertices = m.vertexCount();
+    const double area = totalArea(m), volume = signedVolume(m);
+    SkinTable skin;
+    for (const auto& p : m.positions) skin.push_back(SkinWeights::single(p.x > 16.0f ? 1 : 0));
+    std::vector<std::array<uint32_t, 2>> parents;
+    const bool refined = subdivideToEdgeLength(m, 1.001f, 1024, &parents);
+    CHECK(refined);
+    if (!refined) return;
+    CHECK(m.vertexCount() > originalVertices && m.vertexCount() <= 1024);
+    CHECK(brokenEdges(m) == 0);  // shared edges split once, with no T-junctions
+    CHECK(std::fabs(totalArea(m) - area) < 1e-4);
+    CHECK(std::fabs(signedVolume(m) - volume) < 1e-5);
+    bool shortEdges = true, onSurface = true, orderedMidpoints = true;
+    for (const auto& t : m.triangles)
+        for (int i = 0; i < 3; ++i)
+            shortEdges = shortEdges && length(m.positions[t[i]] - m.positions[t[(i + 1) % 3]]) <= 1.001f;
+    for (const auto& p : m.positions) {
+        const float edge = std::min({std::fabs(p.x), std::fabs(p.x - 32.0f), std::fabs(p.y),
+                                     std::fabs(p.y - 0.03125f), std::fabs(p.z), std::fabs(p.z - 0.03125f)});
+        onSurface = onSurface && edge < 1e-6f;
+    }
+    CHECK(parents.size() == m.vertexCount() - originalVertices);
+    for (size_t i = 0; i < parents.size(); ++i) {
+        const uint32_t a = parents[i][0], b = parents[i][1];
+        const size_t child = originalVertices + i;
+        orderedMidpoints = orderedMidpoints && a < child && b < child;
+        if (a >= child || b >= child) continue;
+        const Vec3 midpoint = (m.positions[a] + m.positions[b]) * 0.5f;
+        orderedMidpoints = orderedMidpoints && length(m.positions[child] - midpoint) < 1e-6f;
+    }
+    CHECK(shortEdges && onSurface && orderedMidpoints);
+    skin = skinAfterSubdivision(skin, parents);
+    CHECK(skin.size() == m.vertexCount());
+    bool linearWeights = true;
+    for (size_t v = 0; v < m.vertexCount(); ++v) {
+        float top = 0;
+        for (int k = 0; k < skin[v].count; ++k)
+            if (skin[v].bone[k] == 1) top = skin[v].weight[k];
+        linearWeights = linearWeights && std::fabs(top - m.positions[v].x / 32.0f) < 1e-5f;
+    }
+    CHECK(linearWeights);
+}
+
+TEST(subdivision_counts_shared_edges_once_and_allows_an_already_refined_mesh) {
+    Mesh m;
+    m.positions = {{0, 0, 0}, {1, 0, 0}, {0, 1, 0}, {1, 1, 0}};
+    m.triangles = {{0, 1, 2}, {1, 3, 2}};
+    std::vector<std::array<uint32_t, 2>> parents;
+    // Only the shared diagonal is long. Both incident triangles use the same
+    // midpoint, so one extra vertex is sufficient at this exact cap.
+    CHECK(subdivideToEdgeLength(m, 1.0f, 5, &parents));
+    CHECK(m.vertexCount() == 5 && m.triangleCount() == 4);
+    CHECK(parents.size() == 1);
+    if (!parents.empty()) CHECK((parents[0] == std::array<uint32_t, 2>{1, 2}));
+    const auto triangles = m.triangles;
+    CHECK(subdivideToEdgeLength(m, 1.0f, m.vertexCount(), &parents));
+    CHECK(m.vertexCount() == 5 && m.triangles == triangles && parents.empty());
+}
+
+TEST(subdivision_actual_cap_failure_preserves_mesh_and_parent_mapping) {
+    Mesh m;
+    m.positions = {{0, 0, 0}, {1, 0, 0}, {0.5f, 0.8660254f, 0}};
+    m.triangles = {{0, 1, 2}};
+    m.computeNormals();
+    m.attributes.resize(m.vertexCount());
+    m.attributes[0].infection = 0.75f;
+    const Mesh before = m;
+    const std::vector<std::array<uint32_t, 2>> sentinel = {{23, 42}};
+    auto parents = sentinel;
+    // Each original edge needs one midpoint (lower bound: six vertices),
+    // but the new interior edges also exceed 0.51. The actual cap must still
+    // stop refinement transactionally after the preflight has accepted it.
+    CHECK(!subdivideToEdgeLength(m, 0.51f, 6, &parents));
+    CHECK(m.triangles == before.triangles && parents == sentinel);
+    CHECK(m.positions.size() == before.positions.size() && m.normals.size() == before.normals.size());
+    CHECK(m.attributes.size() == before.attributes.size() && m.attributes[0].infection == 0.75f);
+    CHECK(std::memcmp(m.positions.data(), before.positions.data(), m.positions.size() * sizeof(Vec3)) == 0);
+    CHECK(std::memcmp(m.normals.data(), before.normals.data(), m.normals.size() * sizeof(Vec3)) == 0);
+}
+
+TEST(subdivision_rejects_absurd_or_invalid_requests_without_mutating_input) {
+    Mesh m;
+    m.positions = {{0, 0, 0}, {1, 0, 0}, {0, 1, 0}};
+    m.triangles = {{0, 1, 2}};
+    const Mesh before = m;
+    const std::vector<std::array<uint32_t, 2>> sentinel = {{23, 42}};
+    auto parents = sentinel;
+    for (float resolution : {0.0f, -1.0f, std::numeric_limits<float>::infinity(),
+                             std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::denorm_min()}) {
+        CHECK(!subdivideToEdgeLength(m, resolution, std::numeric_limits<size_t>::max(), &parents));
+        CHECK(m.triangles == before.triangles && parents == sentinel);
+        CHECK(m.positions.size() == before.positions.size());
+        CHECK(std::memcmp(m.positions.data(), before.positions.data(), m.positions.size() * sizeof(Vec3)) == 0);
+    }
+    CHECK(!subdivideToEdgeLength(m, 2.0f, m.vertexCount() - 1, &parents));
+    CHECK(m.triangles == before.triangles && parents == sentinel);
+    m.positions[1].x = std::numeric_limits<float>::infinity();
+    CHECK(!subdivideToEdgeLength(m, 1.0f, 1000, &parents));
+    CHECK(std::isinf(m.positions[1].x) && m.triangles == before.triangles && parents == sentinel);
+    m.positions[1].x = std::numeric_limits<float>::quiet_NaN();
+    CHECK(!subdivideToEdgeLength(m, 1.0f, 1000, &parents));
+    CHECK(std::isnan(m.positions[1].x) && m.triangles == before.triangles && parents == sentinel);
+    m.positions = before.positions;
+    m.triangles[0][1] = 42;
+    CHECK(!subdivideToEdgeLength(m, 1.0f, 1000, &parents));
+    CHECK(m.triangles[0][1] == 42 && parents == sentinel);
+    m.triangles[0] = {0, 0, 2};
+    CHECK(!subdivideToEdgeLength(m, 0.1f, 1000, &parents));
+    CHECK((m.triangles[0] == std::array<uint32_t, 3>{0, 0, 2}) && parents == sentinel);
 }
 
 TEST(shell_holds_only_the_corruption_lifted_off_the_host) {
