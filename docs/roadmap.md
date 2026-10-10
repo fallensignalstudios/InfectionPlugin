@@ -68,7 +68,13 @@ Next on characters: strands that swing (physics or AnimDynamics), carrying morph
 - **Organic shapes**: knotted roots and beaded strands, unevenly ringed horns and claws, lumpy sacs, orbs and vertebrae (one Roughness setting); tubes resample themselves so the detail never aliases.
 - **Branching**: rootlets fork off the roots; big horns carry hooked barbs.
 
-Not done here: Nanite displacement (true silhouette detail from the maps). It needs per-project tessellation settings and an in-engine test; the detail is in the normals for now.
+## Realism pass 2
+
+- **Colour variation**: bruised patches through the carapace; horn, claw, tooth and barb tips paling toward bone (a tone channel, `TEXCOORD_1.y`).
+- **Halo**: clean tissue ahead of the front darkens and grows a generated capillary network, denser near the front, moving with the spread during play. Overlay shells extend past the front to carry it; the material dithers it into a soft wash.
+- **Slime**: beaded mucus strings from horns and claws to the tissue below, and across tight creases.
+- **Nanite displacement** (opt-in): the carapace detail pushed out into geometry by tessellation.
+- The preview renderer now actually shows soft tissue, tone and the halo (it had been dropping those attributes).
 
 ## Later
 
@@ -77,4 +83,3 @@ Not done here: Nanite displacement (true silhouette detail from the maps). It ne
 - Permanent, unlimited burn scars (a render-target mask instead of four spheres).
 - Tearing the host silhouette at late stage.
 - Cutting into the host: a portal or burrow carved into a wall (maws are raised craters for now).
-- Nanite displacement from the detail maps.

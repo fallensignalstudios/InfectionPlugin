@@ -66,6 +66,12 @@ struct FeatureParams {
     float sacChance = 0.5f;
     int sacCluster = 5;                 // pods in a typical cluster
 
+    // Slime: thin beaded strings of mucus sagging from horns and claws to
+    // the tissue below, and stretched across tight creases.
+    bool slime = true;
+    float slimeChance = 0.5f;
+    float slimeRadius = 0.0008f;
+
     float noduleSpacing = 0.2f;
     float noduleRadius = 0.03f;
     float noduleChance = 0.45f;
@@ -86,7 +92,7 @@ struct FeatureParams {
 struct GrowthStats {
     size_t veinTubes = 0, spikes = 0, nodules = 0, strands = 0, bridges = 0, membranes = 0;
     size_t tendrils = 0, hearts = 0, vertebrae = 0;
-    size_t maws = 0, sacs = 0, barbs = 0, rootlets = 0;
+    size_t maws = 0, sacs = 0, barbs = 0, rootlets = 0, slime = 0;
 };
 
 // Everything one growth produced. `surface` is the host, displaced and

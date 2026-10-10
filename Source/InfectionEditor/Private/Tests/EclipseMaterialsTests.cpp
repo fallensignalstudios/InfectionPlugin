@@ -37,13 +37,17 @@ bool FEclipseMaterialsBuildTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("Every instance takes DetailScale"),
 			Instance->GetScalarParameterValue(FHashedMaterialParameterInfo(TEXT("DetailScale")), Value));
 	}
+	float Reach = 0.0f;
+	TestTrue(TEXT("Surfaces carry the halo"),
+		Materials.Overlay->GetScalarParameterValue(FHashedMaterialParameterInfo(TEXT("HaloReach")), Reach));
+	TestEqual(TEXT("The halo reaches as far as the shells are grown"), Reach, FEclipseMaterialOptions().HaloReach);
 	const UMaterial* Carapace = Materials.Growths->GetMaterial();
 	const UMaterial* Flesh = Materials.Flesh->GetMaterial();
 	TestTrue(TEXT("Hard and soft tissue have their own masters"), Carapace != Flesh);
 	TestTrue(TEXT("The carapace is clear-coated"), Carapace->GetShadingModels().HasShadingModel(MSM_ClearCoat));
 	TestTrue(TEXT("Soft tissue scatters light"), Flesh->GetShadingModels().HasShadingModel(MSM_Subsurface));
 
-	for (const TCHAR* Name : {TEXT("T_EclipseChitin"), TEXT("T_EclipseFlesh")})
+	for (const TCHAR* Name : {TEXT("T_EclipseChitin"), TEXT("T_EclipseFlesh"), TEXT("T_EclipseCapillaries")})
 	{
 		const FString Path = Folder / TEXT("Materials") / Name + TEXT(".") + Name;
 		const UTexture2D* Texture = LoadObject<UTexture2D>(nullptr, *Path);

@@ -69,6 +69,10 @@ rather than exceed **Max Vertices**.
 Vertices that are split along UV or smoothing seams are welded first, so the
 spread crosses those seams. Generated meshes have Nanite enabled by default.
 
+**Bruising** and **Halo Reach** (Colour) set how mottled the carapace is and
+how far ahead of the front clean tissue darkens and grows capillaries; 0 turns
+the halo off. **Slime** and **Slime Chance** control the mucus strings.
+
 **Fusion** (Growths) sets how much the tissue swells up around each growth's
 base; 0 leaves growths sitting on the surface. **Roughness** sets how knotted,
 ringed and lumpy growths are; 0 makes them smooth and round and about halves
@@ -164,6 +168,12 @@ with **Rebuild Materials**.
 | `MI_Eclipse_Growths` | horns, claws, roots, vertebrae, strands, bridges |
 | `MI_Eclipse_Flesh` | hearts, throats, eyes, sacs, membranes, drips |
 | `T_EclipseChitin`, `T_EclipseFlesh` | Generated detail maps (512², uncompressed): height slopes in RG, height in B, cavity in A. Not colour. |
+| `T_EclipseCapillaries` | Generated vessel network for the halo (B: 1 along each vessel). |
+
+![Halo, bruising, bone tips and slime](previews/realism2.jpg)
+
+The overlay material's opacity is dithered (Dither Temporal AA), so the halo's
+partial wash reads as a soft tint over the host under TSR or TAA.
 
 The detail is tiled triplanar over the mesh's **bind pose** (pre-skinned
 position), so it stays fixed to a character's skin as it animates. The
@@ -190,7 +200,26 @@ editor. Parameters:
 | `FleshColor`, `FleshDeep` | dark wine | Soft tissue, and its folds. Also shows in carapace seams. |
 | `ScatterColor`, `Translucency` | red-violet, 0.65 | Light passing through soft tissue (flesh master). |
 | `FleshRoughness`, `FleshGlow` | 0.32, 0.15 | Wet sheen of tissue; faint scattered light at grazing angles. |
+| `BruiseColor`, `BoneColor` | dark wine, pale grey-violet | Bruised patches; horn, claw and tooth tips. |
+| `HaloReach` | 0.35 | Kept equal to the panel's Halo Reach on every grow, so the halo ends where the shell does. |
+| `HaloStrength`, `HaloColor` | 0.6, dusky | The darkening wash ahead of the front. |
+| `CapillaryScale`, `VesselColor` | 10 cm, dark wine | Size of the capillary pattern, and its colour. |
 | `OverlayMode`, `IsGrowth` | set per instance | Leave as the instances set them. |
+
+### Nanite displacement
+
+Turn on **Nanite Displacement** (Output) and press **Rebuild Materials** to
+push the carapace detail out into real geometry, up to **Displacement Depth**.
+It needs Nanite on the generated meshes (the default for static hosts) and, in
+the project's `Config/DefaultEngine.ini` under `[/Script/Engine.RendererSettings]`:
+
+```
+r.Nanite.AllowTessellation=1
+r.Nanite.Tessellation=1
+```
+
+then an editor restart. Without them the setting does nothing. Characters
+(skeletal outputs) keep normal-map detail only.
 
 The vertex data the material reads is listed in the README's output contract.
 
@@ -203,7 +232,7 @@ Editor, Game Development and Game Shipping builds have passed with precompiled
 headers and unity builds disabled (`-NoPCH -NoSharedPCH -DisableUnity`, the
 flags used by `BuildPlugin -StrictIncludes`), with the 35 standalone tests and
 six Unreal automation tests passing, as of the live-spread fixes. The realism
-pass adds standalone tests (40 now) and a materials automation test; its
+pass adds standalone tests (47 now) and a materials automation test; its
 engine side awaits the same build. Run all Unreal tests with
 `Automation RunTests Infection`: they check skeletal corruption-channel bytes,
 skeletal regeneration after host changes, sparse-map queries, and live-spread
@@ -223,6 +252,7 @@ Engine APIs that have moved between versions, and what to check:
 | Nanite not enabled on outputs | `EclipseMeshBridge.cpp` | Set by property name `NaniteSettings.bEnabled`; enable it in the mesh editor meanwhile. |
 | `PreSkinnedPosition` / `VertexInterpolator` / `Transform` errors | `EclipseMaterials.cpp` | Detail uses the bind-pose position through a vertex interpolator; check those expression classes' member names (`VSOutput`, `Input`, `TransformSourceType`). |
 | Detail textures empty or wrong | `EclipseMaterials.cpp`, `BuildDetailTexture` | Written with `Source.Init(..., TSF_BGRA8, ...)` and `TC_VectorDisplacementmap`; check `FTextureSource::Init`. |
+| Displacement setting does nothing | `EclipseMaterials.cpp` | Tessellation and its depth are set by property name (`bEnableTessellation`, `DisplacementScaling`); a warning in the log says if they were not found. Enable them in the material's Nanite settings. Check the two CVars above. |
 | Lighting looks inverted or flat | `EclipseMaterials.cpp` | The normal is world space via the `bTangentSpaceNormal` property set by name; check it is off on both masters. |
 | Skeletal output is empty or fails to commit | `EclipseMeshBridge.cpp`, `WriteSkeletalMesh` | The description includes skin weights and the host's reference bones; check the current skeletal mesh commit and build APIs. |
 

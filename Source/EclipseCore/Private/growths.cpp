@@ -36,6 +36,8 @@ struct Context {
     InsideTest inside;
     Mesh* fleshOut = nullptr;         // soft tissue goes here, hard growths to `out`
     std::vector<Anchor> anchors;
+    // Points along horns and claws, out in the air, that slime can hang from.
+    std::vector<std::pair<Vec3, float>> perches;
     // Space each heart keeps for itself (centre, radius): other growths stay
     // out, so roots do not run into a maw's throat.
     std::vector<std::pair<Vec3, float>> clearings;
@@ -64,6 +66,14 @@ struct Context {
         a.plateTint = surface.attributes[v].plateTint;
         // Growths emerge just after the tissue under them turns.
         a.arrival = std::min(4.0f, surface.attributes[v].arrival + 0.06f);
+        return a;
+    }
+
+    // Along a horn, claw or tooth (t from base to tip): dark at the root,
+    // paling toward the tip like old horn or bone.
+    CorruptionAttributes hornAttr(uint32_t v, float t, float pale = 0.8f) const {
+        CorruptionAttributes a = attr(v, 0.0f);
+        a.tone = pale * smoothstep(0.45f, 1.0f, t);
         return a;
     }
 
@@ -182,10 +192,14 @@ void growSpikes(Context& c, Rng& rng, Mesh& out, GrowthStats& stats) {
             // Flared at the root, where it tears out of the tissue.
             float flare = 1.0f + 0.5f * std::pow(1.0f - t, 8.0f);
             radii.push_back(i + 1 == pts.size() ? 0.0f : r0 * flare * std::pow(1.0f - t, 1.1f));
-            attrs.push_back(c.attr(v, 0.0f));
+            attrs.push_back(c.hornAttr(v, t));
         }
         // Growth rings near the base, like horn or keratin, and slight knots.
         appendTube(out, pts, radii, attrs, big ? 12 : 8, true, c.style(0.06f, r0 * 1.5f, 0.08f, len * 0.05f, v));
+        for (float t : {0.35f, 0.6f}) {
+            size_t i = static_cast<size_t>(t * static_cast<float>(pts.size() - 1));
+            c.perches.emplace_back(pts[i], radii[i]);
+        }
         c.fuse(p, n, r0 * 3.2f, r0 * 0.9f);
         ++stats.spikes;
 
@@ -212,7 +226,7 @@ void growSpikes(Context& c, Rng& rng, Mesh& out, GrowthStats& stats) {
             std::vector<CorruptionAttributes> ba;
             for (size_t j = 0; j < barb.size(); ++j) {
                 br.push_back(j + 1 == barb.size() ? 0.0f : rb * (1.0f - static_cast<float>(j) / static_cast<float>(barb.size() - 1)));
-                ba.push_back(c.attr(v, 0.0f));
+                ba.push_back(c.hornAttr(v, static_cast<float>(j) / static_cast<float>(barb.size() - 1), 0.6f));
             }
             appendTube(out, barb, br, ba, 6);
             ++stats.barbs;
@@ -397,11 +411,13 @@ void growHearts(Context& c, Rng& rng, Mesh& out, GrowthStats& stats) {
                     float t = static_cast<float>(j) / static_cast<float>(pts.size() - 1);
                     float flare = 1.0f + 0.25f * std::pow(1.0f - t, 8.0f);
                     radii.push_back(j + 1 == pts.size() ? 0.0f : r0 * flare * std::pow(1.0f - t, 1.1f));
-                    attrs.push_back(c.attr(s, 0.0f));
+                    attrs.push_back(c.hornAttr(s, t));
                 }
                 appendTube(out, pts, radii, attrs, 10, true,
                            c.style(0.05f, r0 * 1.5f, 0.09f, clawLength * 0.05f, s * 131u + static_cast<uint32_t>(i)));
                 c.fuse(base + n * (0.15f * R), n, r0 * 3.0f, r0 * 0.8f);
+                const size_t mid = pts.size() / 2;
+                c.perches.emplace_back(pts[mid], radii[mid]);
             }
         };
 
@@ -470,7 +486,7 @@ void growHearts(Context& c, Rng& rng, Mesh& out, GrowthStats& stats) {
             for (size_t j = 0; j < pts.size(); ++j) {
                 float t = static_cast<float>(j) / static_cast<float>(pts.size() - 1);
                 radii.push_back(j + 1 == pts.size() ? 0.0f : r0 * std::pow(1.0f - t, 0.9f));
-                attrs.push_back(c.attr(s, 0.0f));
+                attrs.push_back(c.hornAttr(s, t, 1.0f));  // teeth pale toward the tip
             }
             appendTube(out, pts, radii, attrs, 6, true, c.style(0.08f, r0 * 1.5f, 0.0f, 1.0f, s * 17u + static_cast<uint32_t>(i)));
         }
@@ -765,6 +781,77 @@ void growBridges(Context& c, Rng& rng, Mesh& out, GrowthStats& stats) {
 }
 
 
+// A string of mucus between two points: sagging, beaded, thinnest in the
+// middle, with a drop gathering at its lowest point.
+bool appendSlime(Context& c, uint32_t v, const Vec3& a, const Vec3& b, float sag, float radius) {
+    float len = length(b - a);
+    if (len < 1e-4f) return false;
+    auto pts = catenary(a, b, sag, 14);
+    if (!clearOfHost(c, pts)) return false;
+    std::vector<float> radii;
+    std::vector<CorruptionAttributes> attrs;
+    size_t lowest = 0;
+    for (size_t i = 0; i < pts.size(); ++i) {
+        float t = static_cast<float>(i) / static_cast<float>(pts.size() - 1);
+        radii.push_back(radius * (1.0f - 0.55f * std::sin(kPi * t)));
+        attrs.push_back(c.softAttr(v, 0.0f));
+        if (pts[i].y < pts[lowest].y) lowest = i;
+    }
+    appendTube(*c.fleshOut, pts, radii, attrs, 5, true, c.style(0.45f, len * 0.12f, 0.0f, 1.0f, v * 7u + 3u));
+    if (lowest > 0 && lowest + 1 < pts.size()) {
+        float rd = radius * 2.2f;
+        Vec3 side = anyPerpendicular(kDown);
+        appendEllipsoid(*c.fleshOut, pts[lowest] + kDown * (rd * 0.7f), side, cross(kDown, side), kDown,
+                        Vec3{rd, rd, rd * 1.6f}, 5, 8, [&](const Vec3&) { return c.softAttr(v, 0.0f); });
+    }
+    return true;
+}
+
+void growSlime(Context& c, Rng& rng, GrowthStats& stats) {
+    const auto& S = c.surface;
+    const float k = c.f.scale;
+    const float r = c.f.slimeRadius * k;
+    // From horns and claws down to the tissue beneath them.
+    for (const auto& [at, thickness] : c.perches) {
+        if (rng.uniform() > c.f.slimeChance) continue;
+        const int strings = 1 + static_cast<int>(rng.below(3));
+        for (int s = 0; s < strings; ++s) {
+            // A spot on the tissue below and around the perch, facing it.
+            Vec3 aim = at + kDown * (0.06f * k) +
+                       Vec3{rng.range(-1.0f, 1.0f), 0.0f, rng.range(-1.0f, 1.0f)} * (0.04f * k);
+            int32_t w = c.grid.nearest(aim, 0.1f * k);
+            if (w < 0) continue;
+            const uint32_t u = static_cast<uint32_t>(w);
+            Vec3 d = at - S.positions[u];
+            float len = length(d);
+            if (len < thickness * 2.0f || len > 0.15f * k || dot(S.normals[u], d) <= 0.0f) continue;
+            if (c.infection(u) < 0.3f) continue;
+            if (appendSlime(c, u, at, S.positions[u], len * rng.range(0.15f, 0.4f), r * rng.range(0.7f, 1.4f)))
+                ++stats.slime;
+        }
+    }
+    // Across tight creases: short strings between tissue that faces itself.
+    auto sites = poissonThin(S.positions, c.candidates([&](uint32_t v) { return c.infection(v) > 0.6f; }), 0.05f * k);
+    std::vector<uint8_t> used(S.vertexCount(), 0);
+    for (uint32_t a : sites) {
+        if (rng.uniform() > 0.4f * c.f.slimeChance || c.cleared(S.positions[a])) continue;
+        int32_t b = bridgePartner(c, a, used, 0.012f * k, 0.07f * k, 0.3f);
+        if (b < 0) continue;
+        const Vec3 pa = S.positions[a], pb = S.positions[static_cast<uint32_t>(b)];
+        const int strings = 1 + static_cast<int>(rng.below(3));
+        bool any = false;
+        for (int s = 0; s < strings; ++s) {
+            Vec3 jitter = Vec3{rng.range(-1.0f, 1.0f), rng.range(-1.0f, 1.0f), rng.range(-1.0f, 1.0f)} * (0.004f * k);
+            any = appendSlime(c, a, pa + jitter, pb - jitter, length(pb - pa) * rng.range(0.1f, 0.35f),
+                              r * rng.range(0.6f, 1.2f)) || any;
+        }
+        if (any) {
+            used[a] = used[static_cast<uint32_t>(b)] = 1;
+            ++stats.slime;
+        }
+    }
+}
+
 // Clusters of swollen pods packed into the creases, translucent and lit
 // faintly from within.
 void growSacs(Context& c, Rng& rng, GrowthStats& stats) {
@@ -861,7 +948,7 @@ void applyFusion(Mesh& S, const std::vector<Anchor>& anchors, const PointGrid& g
         at.height += lift[v];
         at.infection = std::max(at.infection, weight[v]);
         // The stretched flanks show the raw tissue under the carapace.
-        at.flesh = std::max(at.flesh, 0.3f * 4.0f * weight[v] * (1.0f - weight[v]));
+        at.flesh = std::max(at.flesh, 0.15f * 4.0f * weight[v] * (1.0f - weight[v]));
     }
     if (moved) S.computeNormals();
 }
@@ -909,7 +996,7 @@ Growth grow(const Mesh& host, const std::vector<Vec3>& seeds, const GrowthParams
     // Each feature draws from its own stream, so turning one off or retuning
     // it leaves the others exactly where they were.
     Rng spikeRng(params.seed, 11), noduleRng(params.seed, 12), strandRng(params.seed, 13), bridgeRng(params.seed, 14);
-    Rng tendrilRng(params.seed, 15), heartRng(params.seed, 16), sacRng(params.seed, 17);
+    Rng tendrilRng(params.seed, 15), heartRng(params.seed, 16), sacRng(params.seed, 17), slimeRng(params.seed, 18);
     if (features.hearts)
         for (uint32_t s : heartSeeds(c))
             c.clearings.emplace_back(S.positions[s], heartRadius(c, s) * (heartIsMaw(c) ? 1.5f : 0.9f));
@@ -922,6 +1009,7 @@ Growth grow(const Mesh& host, const std::vector<Vec3>& seeds, const GrowthParams
     growStrands(c, strandRng, g.growths, g.stats);
     growBridges(c, bridgeRng, g.growths, g.stats);
     if (features.sacs) growSacs(c, sacRng, g.stats);
+    if (features.slime) growSlime(c, slimeRng, g.stats);
     applyFusion(g.surface, c.anchors, c.grid);
     return g;
 }
