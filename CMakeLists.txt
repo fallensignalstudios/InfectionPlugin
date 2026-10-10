@@ -40,6 +40,7 @@ else()
 endif()
 add_library(eclipse_core ${ECLIPSE_CORE_KIND}
   Source/EclipseCore/Private/corruption.cpp
+  Source/EclipseCore/Private/detail.cpp
   Source/EclipseCore/Private/export.cpp
   Source/EclipseCore/Private/geometry.cpp
   Source/EclipseCore/Private/growths.cpp

@@ -106,6 +106,12 @@ bool writeGlb(const std::string& path, const std::vector<NamedMesh>& meshes, std
                 appendF32(bin, a.height);
             }
             attributes << ",\"TEXCOORD_0\":" << addAccessor(endView(s, false), 5126, n, "VEC2", "");
+            s = beginView();
+            for (const auto& a : mesh.attributes) {
+                appendF32(bin, clamp01(a.flesh));
+                appendF32(bin, 0.0f);
+            }
+            attributes << ",\"TEXCOORD_1\":" << addAccessor(endView(s, false), 5126, n, "VEC2", "");
         }
         s = beginView();
         for (const auto& t : mesh.triangles) {

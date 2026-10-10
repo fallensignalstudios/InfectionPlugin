@@ -16,7 +16,7 @@ std::vector<Vec3> sampleQuadratic(const Vec3& a, const Vec3& control, const Vec3
 }
 
 void appendTube(Mesh& mesh, const std::vector<Vec3>& points, const std::vector<float>& radii,
-                const std::vector<CorruptionAttributes>& attributes, int sides) {
+                const std::vector<CorruptionAttributes>& attributes, int sides, bool capped) {
     const size_t n = points.size();
     if (n < 2 || sides < 3) return;
     const float pi = 3.14159265358979f;
@@ -68,10 +68,10 @@ void appendTube(Mesh& mesh, const std::vector<Vec3>& points, const std::vector<f
                 mesh.triangles.push_back({ring(i, s + 1), ring(i, s), centre});
         }
     };
-    cap(0, points[0], -tangents[0], attributes[0], false);
+    if (capped) cap(0, points[0], -tangents[0], attributes[0], false);
     if (sharpTip)
         cap(ringCount - 1, points[n - 1], tangents[n - 1], attributes[n - 1], true);
-    else
+    else if (capped)
         cap(n - 1, points[n - 1], tangents[n - 1], attributes[n - 1], true);
 }
 

@@ -18,6 +18,10 @@ struct FeatureParams {
     bool enabled = true;                // false: corrupt the surface only
     float scale = 1.0f;
 
+    // How much the tissue swells up around the base of each growth, so it
+    // grows out of the surface instead of sitting on it. 0 turns it off.
+    float fusion = 1.0f;
+
     bool veinTubes = true;
     float veinTubeMinRadius = 0.0015f;  // thinner veins stay painted only
 
@@ -37,7 +41,9 @@ struct FeatureParams {
     float tendrilDensity = 0.7f;        // share of possible roots that grow
 
     // Hearts: a glowing orb at each seed, gripped by a ring of claws; past
-    // mawCoverage it opens into a maw with a second ring.
+    // mawCoverage it opens into a maw: a crater of swollen lips around a
+    // throat that glows from deep inside, ringed by teeth and a second ring
+    // of claws.
     bool hearts = true;
     float heartRadius = 0.07f;
     int heartClaws = 9;
@@ -46,6 +52,13 @@ struct FeatureParams {
     // Vertebrae: segmented ridges along the thickest vein trunks.
     bool vertebrae = true;
     float vertebraSpacing = 0.025f;
+
+    // Sacs: clusters of swollen, translucent pods packed into creases.
+    bool sacs = true;
+    float sacSpacing = 0.12f;
+    float sacRadius = 0.022f;
+    float sacChance = 0.5f;
+    int sacCluster = 5;                 // pods in a typical cluster
 
     float noduleSpacing = 0.2f;
     float noduleRadius = 0.03f;
@@ -67,13 +80,17 @@ struct FeatureParams {
 struct GrowthStats {
     size_t veinTubes = 0, spikes = 0, nodules = 0, strands = 0, bridges = 0, membranes = 0;
     size_t tendrils = 0, hearts = 0, vertebrae = 0;
+    size_t maws = 0, sacs = 0;
 };
 
 // Everything one growth produced. `surface` is the host, displaced and
-// carrying corruption attributes; `growths` is the added geometry.
+// carrying corruption attributes; `growths` is the added hard geometry
+// (horns, claws, roots, strands) and `flesh` the soft tissue (hearts,
+// throats, eyes, sacs, membranes), which wants a translucent material.
 struct Growth {
     Mesh surface;
     Mesh growths;
+    Mesh flesh;
     SpreadField spread;
     VeinNetwork veins;
     PlateLayout plates;

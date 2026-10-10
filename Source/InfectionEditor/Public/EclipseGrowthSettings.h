@@ -89,6 +89,11 @@ public:
 	UPROPERTY(EditAnywhere, Config, Category = "Growths", meta = (ClampMin = "0.1", ClampMax = "10", EditCondition = "bGrowths"))
 	float FeatureScale = 1.0f;
 
+	// How much the tissue swells up around the base of each growth, so it
+	// grows out of the surface instead of sitting on it. 0 turns it off.
+	UPROPERTY(EditAnywhere, Config, Category = "Growths", meta = (ClampMin = "0", ClampMax = "3", EditCondition = "bGrowths"))
+	float Fusion = 1.0f;
+
 	UPROPERTY(EditAnywhere, Config, Category = "Growths", meta = (EditCondition = "bGrowths"))
 	bool bVeinTubes = true;
 
@@ -109,9 +114,17 @@ public:
 	UPROPERTY(EditAnywhere, Config, Category = "Growths", meta = (ClampMin = "1", ClampMax = "200", Units = "cm", EditCondition = "bGrowths && bHearts"))
 	float HeartSize = 7.0f;
 
-	// Above this coverage a heart opens into a maw with a second ring of claws.
+	// Above this coverage a heart opens into a maw: a crater of swollen lips
+	// around a throat that glows from deep inside, ringed with teeth.
 	UPROPERTY(EditAnywhere, Config, Category = "Growths", meta = (ClampMin = "0", ClampMax = "1.01", EditCondition = "bGrowths && bHearts"))
 	float MawCoverage = 0.7f;
+
+	// Clusters of swollen, translucent pods packed into folds and corners.
+	UPROPERTY(EditAnywhere, Config, Category = "Growths", meta = (EditCondition = "bGrowths"))
+	bool bSacs = true;
+
+	UPROPERTY(EditAnywhere, Config, Category = "Growths", meta = (ClampMin = "0", ClampMax = "1", EditCondition = "bGrowths && bSacs"))
+	float SacChance = 0.5f;
 
 	// Segmented ridges along the thickest vein trunks.
 	UPROPERTY(EditAnywhere, Config, Category = "Growths", meta = (EditCondition = "bGrowths"))

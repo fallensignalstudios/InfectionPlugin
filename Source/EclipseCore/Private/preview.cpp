@@ -45,6 +45,20 @@ Vec3 shade(const Vec3& normal, const Vec3& toEye, const CorruptionAttributes& a,
     float fresnel = std::pow(1.0f - std::max(0.0f, dot(n, toEye)), 4.0f);
     colour += Vec3{0.55f, 0.55f, 0.6f} * fresnel * (0.04f + 0.3f * s);
 
+    // Soft tissue: dark and wet, scattering wine-red light through its thin
+    // edges and from behind, like the flesh material's subsurface shading.
+    const float soft = clamp01(a.flesh) * s;
+    if (soft > 0.0f) {
+        Vec3 fleshBase{0.10f, 0.025f, 0.06f};
+        float wrap = std::max(0.0f, (dot(n, light.key) + 0.5f) / 1.5f) * 0.8f +
+                     std::max(0.0f, (dot(n, light.fill) + 0.5f) / 1.5f) * 0.25f;
+        float through = std::pow(std::max(0.0f, dot(-n, light.key)), 2.0f) * 0.6f +
+                        std::pow(1.0f - std::max(0.0f, dot(n, toEye)), 2.0f) * 0.35f;
+        Vec3 wet = fleshBase * (ambient + wrap) + Vec3{0.45f, 0.06f, 0.20f} * (through * 0.5f);
+        wet += Vec3{1.0f, 0.95f, 1.0f} * (0.5f * std::pow(std::max(0.0f, dot(n, h)), 90.0f) * 2.4f);
+        colour = lerp(colour, wet, soft);
+    }
+
     float g = clamp01(a.glow);
     colour += Vec3{0.55f, 0.14f, 1.0f} * (g * 2.0f);
     colour += Vec3{0.9f, 0.75f, 1.0f} * (std::pow(g, 6.0f) * 0.9f);

@@ -2,34 +2,48 @@
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "EclipseMeshBridge.h"
+#include "Engine/Texture2D.h"
 #include "Factories/MaterialFactoryNew.h"
 #include "Factories/MaterialInstanceConstantFactoryNew.h"
 #include "MaterialEditingLibrary.h"
 #include "Materials/Material.h"
+#include "Materials/MaterialExpressionCameraVectorWS.h"
 #include "Materials/MaterialExpressionCustom.h"
 #include "Materials/MaterialExpressionDistance.h"
+#include "Materials/MaterialExpressionPreSkinnedNormal.h"
+#include "Materials/MaterialExpressionPreSkinnedPosition.h"
 #include "Materials/MaterialExpressionScalarParameter.h"
 #include "Materials/MaterialExpressionTextureCoordinate.h"
+#include "Materials/MaterialExpressionTextureObject.h"
 #include "Materials/MaterialExpressionTime.h"
+#include "Materials/MaterialExpressionTransform.h"
 #include "Materials/MaterialExpressionVectorParameter.h"
 #include "Materials/MaterialExpressionVertexColor.h"
+#include "Materials/MaterialExpressionVertexInterpolator.h"
+#include "Materials/MaterialExpressionVertexNormalWS.h"
 #include "Materials/MaterialExpressionWorldPosition.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Misc/FeedbackContext.h"
 #include "UObject/Package.h"
 
+#include "eclipse/detail.h"
+
 #define LOCTEXT_NAMESPACE "EclipseMaterials"
 
 namespace
 {
-	const TCHAR* MasterName = TEXT("M_EclipseBiomass");
+	const TCHAR* BiomassName = TEXT("M_EclipseBiomass");
+	const TCHAR* FleshName = TEXT("M_EclipseFlesh");
+	const TCHAR* ChitinTextureName = TEXT("T_EclipseChitin");
+	const TCHAR* FleshTextureName = TEXT("T_EclipseFlesh");
+	constexpr int32 DetailSize = 512;
 
 	// Shared by every node: how far the growth has played (reveal) and how
 	// overtaken this point is once revealed (s). UV.x is arrival: 0 at the
 	// seed, 1 at the front. Animate Growth from 0 to about 1.4 to replay it.
 	// Burns (from the Eclipse Spread component) are spheres the corruption is
 	// cut out of, D# the distance to each and R# its radius (0 = unused); the
-	// band where it is burning away glows as embers.
+	// band where it is burning away glows as embers. UV1.x marks soft tissue.
 	const TCHAR* Prelude = TEXT(
 		"float burn = 1.0;\n"
 		"burn *= R0 > 0.0 ? saturate((D0 - R0) / max(BurnSoftness, 1.0)) : 1.0;\n"
@@ -39,21 +53,70 @@ namespace
 		"float grown = saturate((Growth - UV.x) / max(Softness, 0.001));\n"
 		"float reveal = grown * burn;\n"
 		"float s = saturate(VC.r) * reveal;\n"
+		"float fleshy = saturate(UV1.x);\n"
 		"float ember = 4.0 * burn * (1.0 - burn) * grown * step(0.001, VC.r + VC.g);\n");
 
+	// Triplanar detail over the pre-skinned position, so it stays put on an
+	// animated character. PL is in centimetres; DetailScale is one tile. Hard
+	// tissue samples the chitin map, soft tissue the finer flesh map. Leaves
+	// d (the blended texel), dX/dY/dZ (each projection's), tn (the normal)
+	// and tw (projection weights).
+	const TCHAR* Triplanar = TEXT(
+		"float3 tn = normalize(NL);\n"
+		"float3 tw = pow(abs(tn), 4.0);\n"
+		"tw /= tw.x + tw.y + tw.z;\n"
+		"float3 tq = PL / max(DetailScale, 0.1);\n"
+		"float3 fq = tq * 1.7;\n"
+		"float4 dX = lerp(Texture2DSample(Chitin, ChitinSampler, tq.yz), Texture2DSample(FleshMap, FleshMapSampler, fq.yz), fleshy);\n"
+		"float4 dY = lerp(Texture2DSample(Chitin, ChitinSampler, tq.xz), Texture2DSample(FleshMap, FleshMapSampler, fq.xz), fleshy);\n"
+		"float4 dZ = lerp(Texture2DSample(Chitin, ChitinSampler, tq.xy), Texture2DSample(FleshMap, FleshMapSampler, fq.xy), fleshy);\n"
+		"float4 d = dX * tw.x + dY * tw.y + dZ * tw.z;\n");
+
+	// The maps store height slopes, not normals: tilting the surface normal
+	// against the slope works in any projection and on any facing. Returns
+	// the detailed normal in the mesh's own (pre-skinned) space.
+	const TCHAR* DetailCode = TEXT(
+		"float2 gX = dX.rg * 2.0 - 1.0;\n"
+		"float2 gY = dY.rg * 2.0 - 1.0;\n"
+		"float2 gZ = dZ.rg * 2.0 - 1.0;\n"
+		"float3 grad = tw.x * float3(0.0, gX.x, gX.y) + tw.y * float3(gY.x, 0.0, gY.y) + tw.z * float3(gZ.x, gZ.y, 0.0);\n"
+		"grad -= tn * dot(grad, tn);\n"
+		"float strength = DetailStrength * lerp(1.0, FleshDetail, fleshy) * s;\n"
+		"return normalize(tn - strength * grad);\n");
+
+	// The detailed normal arrives through the component's rigid transform
+	// (NPW) beside the plain normal taken the same way (NLW). Skinning turns
+	// the plain normal into the vertex's world normal (NW); turn the detailed
+	// one by the same rotation, so the detail follows a bending limb.
+	const TCHAR* NormalCode = TEXT(
+		"float3 a = normalize(NLW);\n"
+		"float3 b = normalize(NW);\n"
+		"float3 p = normalize(NPW);\n"
+		"float c = dot(a, b);\n"
+		"if (c < -0.999) return -p;\n"
+		"float3 v = cross(a, b);\n"
+		"return normalize(p * c + cross(v, p) + v * (dot(v, p) / (1.0 + c)));\n");
+
+	// Carapace: near-black plates, raw tissue showing in the seams and on the
+	// stretched flanks around growths, darkened down in the detail's grooves.
 	const TCHAR* BaseColorCode = TEXT(
 		"float inflamed = 4.0 * s * (1.0 - s);\n"
 		"float3 host = lerp(HostColor, InflamedColor, OverlayMode);\n"
 		"float3 c = lerp(host, InflamedColor, 0.45 * inflamed * (1.0 - s));\n"
-		"return lerp(c, CarapaceColor + CarapaceTint * VA, s);\n");
+		"float3 shell = lerp(CarapaceColor + CarapaceTint * VA, FleshColor, fleshy);\n"
+		"c = lerp(c, shell, s);\n"
+		"return c * lerp(1.0, d.a, CavityStrength * s);\n");
 
-	// The glow pulses in waves travelling outward from the seed.
+	// The glow pulses in waves travelling outward from the seed. Exposed
+	// tissue adds a faint scattered light, strongest at grazing angles.
 	const TCHAR* EmissiveCode = TEXT(
 		"float pulse = 1.0 + PulseAmount * sin(Time * PulseSpeed * 6.2831853 - UV.x * 8.0);\n"
-		"return GlowIntensity * (GlowColor * saturate(VC.g) * reveal * pulse + EmberColor * ember);\n");
+		"float rim = pow(1.0 - saturate(abs(dot(normalize(NW), normalize(V)))), 3.0);\n"
+		"float3 scatter = ScatterColor * FleshGlow * fleshy * s * (0.3 + rim);\n"
+		"return GlowIntensity * (GlowColor * saturate(VC.g) * reveal * pulse + EmberColor * ember) + scatter;\n");
 
-	const TCHAR* RoughnessCode = TEXT("return lerp(0.7, 0.22, s);\n");
-	const TCHAR* ClearCoatCode = TEXT("return s;\n");
+	const TCHAR* RoughnessCode = TEXT("return lerp(lerp(0.7, 0.22, s), FleshRoughness, fleshy * s);\n");
+	const TCHAR* ClearCoatCode = TEXT("return s * (1.0 - 0.6 * fleshy);\n");
 
 	// Overlay shells show only where corrupted or on a vein's bright core;
 	// growths show once revealed; a replacing surface is always solid.
@@ -61,6 +124,15 @@ namespace
 		"float visible = saturate(max(VC.r * 2.0, (VC.g - 0.3) * 3.0));\n"
 		"float surfaceOpacity = lerp(1.0, reveal * visible, OverlayMode);\n"
 		"return lerp(surfaceOpacity, reveal, IsGrowth);\n");
+
+	// Soft tissue: dark wine flesh, lighter on its swellings and black in its
+	// folds. The dark lid around an eye arrives in the crack channel.
+	const TCHAR* FleshBaseCode = TEXT(
+		"float3 c = lerp(FleshDeep, FleshColor, saturate(0.4 + d.b));\n"
+		"c *= lerp(1.0, d.a, CavityStrength);\n"
+		"return c * (1.0 - 0.85 * saturate(VC.b));\n");
+	const TCHAR* FleshRoughnessCode = TEXT("return FleshRoughness + 0.25 * (1.0 - d.a);\n");
+	const TCHAR* FleshOpacityCode = TEXT("return reveal;\n");
 
 	FString ObjectPath(const FString& PackageName, const FString& Name)
 	{
@@ -73,13 +145,14 @@ namespace
 		return LoadObject<T>(nullptr, *ObjectPath(PackageName, Name), nullptr, LOAD_NoWarn | LOAD_Quiet);
 	}
 
-	UMaterialExpressionScalarParameter* Scalar(UMaterial* M, const TCHAR* Name, float Value, int32 Y)
+	UMaterialExpressionScalarParameter* Scalar(UMaterial* M, const TCHAR* Name, float Value, int32 Y,
+		const TCHAR* Group = TEXT("Eclipse"))
 	{
 		auto* P = Cast<UMaterialExpressionScalarParameter>(
 			UMaterialEditingLibrary::CreateMaterialExpression(M, UMaterialExpressionScalarParameter::StaticClass(), -900, Y));
 		P->ParameterName = Name;
 		P->DefaultValue = Value;
-		P->Group = TEXT("Eclipse");
+		P->Group = Group;
 		return P;
 	}
 
@@ -102,13 +175,15 @@ namespace
 		}
 	};
 
+	// A Custom node running Body (after the Prelude, unless bPrelude is
+	// false) over the named inputs.
 	UMaterialExpressionCustom* Custom(UMaterial* M, const TCHAR* Description, const FString& Body,
-		ECustomMaterialOutputType Type, const FInputs& Inputs, int32 Y)
+		ECustomMaterialOutputType Type, const FInputs& Inputs, int32 Y, bool bPrelude = true)
 	{
 		auto* C = Cast<UMaterialExpressionCustom>(
 			UMaterialEditingLibrary::CreateMaterialExpression(M, UMaterialExpressionCustom::StaticClass(), -350, Y));
 		C->Description = Description;
-		C->Code = FString(Prelude) + Body;
+		C->Code = bPrelude ? FString(Prelude) + Body : Body;
 		C->OutputType = Type;
 		C->Inputs.Reset();
 		for (const auto& Input : Inputs.List)
@@ -124,63 +199,158 @@ namespace
 		return C;
 	}
 
-	// Builds the graph into Existing (cleared first) or into a new asset.
-	UMaterial* BuildMaster(const FString& Folder, UMaterial* Existing, FText& OutError)
+	// A pre-skinned (bind pose) attribute, passed on from the vertex shader:
+	// the engine provides it only there.
+	UMaterialExpression* Interpolated(UMaterial* M, UClass* Attribute, int32 Y)
 	{
-		UMaterial* M = Existing;
-		if (M)
+		UMaterialExpression* Source = UMaterialEditingLibrary::CreateMaterialExpression(M, Attribute, -1500, Y);
+		auto* Interpolator = Cast<UMaterialExpressionVertexInterpolator>(
+			UMaterialEditingLibrary::CreateMaterialExpression(M, UMaterialExpressionVertexInterpolator::StaticClass(), -1200, Y));
+		Interpolator->VSOutput.Expression = Source;
+		return Interpolator;
+	}
+
+	UMaterialExpressionTransform* LocalToWorld(UMaterial* M, UMaterialExpression* Input, int32 Y)
+	{
+		auto* T = Cast<UMaterialExpressionTransform>(
+			UMaterialEditingLibrary::CreateMaterialExpression(M, UMaterialExpressionTransform::StaticClass(), -100, Y));
+		T->Input.Expression = Input;
+		T->TransformSourceType = TRANSFORMSOURCE_Local;
+		T->TransformType = TRANSFORM_World;
+		return T;
+	}
+
+	UMaterialExpressionTextureObject* TextureObject(UMaterial* M, UTexture2D* Texture, int32 Y)
+	{
+		auto* T = Cast<UMaterialExpressionTextureObject>(
+			UMaterialEditingLibrary::CreateMaterialExpression(M, UMaterialExpressionTextureObject::StaticClass(), -1500, Y));
+		T->Texture = Texture;
+		T->SamplerType = UMaterialExpressionTextureBase::GetSamplerTypeForTexture(Texture);
+		return T;
+	}
+
+	// One of the generated detail maps (see eclipse/detail.h), stored
+	// uncompressed: its channels are slopes and heights, not colours.
+	UTexture2D* BuildDetailTexture(const FString& Folder, const TCHAR* Name, eclipse::DetailKind Kind,
+		UTexture2D* Existing)
+	{
+		const eclipse::DetailMap Map = eclipse::makeDetailMap(Kind, DetailSize);
+		TArray<uint8> Bgra;
+		Bgra.SetNumUninitialized(static_cast<int32>(Map.rgba.size()));
+		for (int32 I = 0; I + 3 < Bgra.Num(); I += 4)
 		{
-			M->Modify();
-			UMaterialEditingLibrary::DeleteAllMaterialExpressions(M);
+			Bgra[I + 0] = Map.rgba[I + 2];
+			Bgra[I + 1] = Map.rgba[I + 1];
+			Bgra[I + 2] = Map.rgba[I + 0];
+			Bgra[I + 3] = Map.rgba[I + 3];
+		}
+		UTexture2D* Texture = Existing;
+		if (Texture)
+		{
+			Texture->Modify();
 		}
 		else
 		{
-			UPackage* Package = CreatePackage(*(Folder / MasterName));
-			auto* Factory = NewObject<UMaterialFactoryNew>();
-			M = Cast<UMaterial>(Factory->FactoryCreateNew(UMaterial::StaticClass(), Package, MasterName,
-				RF_Public | RF_Standalone | RF_Transactional, nullptr, GWarn));
-			if (!M)
-			{
-				OutError = LOCTEXT("MaterialFailed", "Could not create the Eclipse material.");
-				return nullptr;
-			}
-			FAssetRegistryModule::AssetCreated(M);
+			UPackage* Package = CreatePackage(*(Folder / Name));
+			Texture = NewObject<UTexture2D>(Package, Name, RF_Public | RF_Standalone | RF_Transactional);
+			FAssetRegistryModule::AssetCreated(Texture);
+		}
+		Texture->Source.Init(Map.size, Map.size, 1, 1, TSF_BGRA8, Bgra.GetData());
+		Texture->SRGB = false;
+		Texture->CompressionSettings = TC_VectorDisplacementmap;  // uncompressed 8-bit RGBA
+		Texture->AddressX = TA_Wrap;
+		Texture->AddressY = TA_Wrap;
+		Texture->PostEditChange();
+		Texture->MarkPackageDirty();
+		return Texture;
+	}
+
+	UMaterial* CreateOrClear(const FString& Folder, const TCHAR* Name, UMaterial* Existing, FText& OutError)
+	{
+		if (Existing)
+		{
+			Existing->Modify();
+			UMaterialEditingLibrary::DeleteAllMaterialExpressions(Existing);
+			return Existing;
+		}
+		UPackage* Package = CreatePackage(*(Folder / Name));
+		auto* Factory = NewObject<UMaterialFactoryNew>();
+		UMaterial* M = Cast<UMaterial>(Factory->FactoryCreateNew(UMaterial::StaticClass(), Package, Name,
+			RF_Public | RF_Standalone | RF_Transactional, nullptr, GWarn));
+		if (!M)
+		{
+			OutError = FText::Format(LOCTEXT("MaterialFailed", "Could not create {0}."), FText::FromString(Name));
+			return nullptr;
+		}
+		FAssetRegistryModule::AssetCreated(M);
+		return M;
+	}
+
+	struct FDetailTextures
+	{
+		UTexture2D* Chitin = nullptr;
+		UTexture2D* Flesh = nullptr;
+	};
+
+	// Builds a master into Existing (cleared first) or into a new asset. Both
+	// masters share the reveal, burn, glow and detail logic; the carapace one
+	// is clear-coated, the soft-tissue one scatters light through itself.
+	UMaterial* BuildMaster(const FString& Folder, bool bFlesh, UMaterial* Existing, const FDetailTextures& Detail,
+		FText& OutError)
+	{
+		UMaterial* M = CreateOrClear(Folder, bFlesh ? FleshName : BiomassName, Existing, OutError);
+		if (!M)
+		{
+			return nullptr;
 		}
 
-		// Masked so overlay shells and growths can be revealed; two-sided for
-		// membranes and open environment shells; clear coat for the wet sheen.
+		// Masked so shells and growths can be revealed; two-sided for
+		// membranes and open environment shells. The normal is given in world
+		// space (see NormalCode), so it needs no tangents from the mesh.
 		EclipseBridge::SetEnumProperty(M, TEXT("BlendMode"), BLEND_Masked);
 		EclipseBridge::SetBoolProperty(M, TEXT("TwoSided"), true);
-		M->SetShadingModel(MSM_ClearCoat);
+		EclipseBridge::SetBoolProperty(M, TEXT("bTangentSpaceNormal"), false);
+		M->SetShadingModel(bFlesh ? MSM_Subsurface : MSM_ClearCoat);
 
-		auto* Vertex = UMaterialEditingLibrary::CreateMaterialExpression(M, UMaterialExpressionVertexColor::StaticClass(), -900, -700);
+		auto* Vertex = UMaterialEditingLibrary::CreateMaterialExpression(M, UMaterialExpressionVertexColor::StaticClass(), -900, -900);
 		auto* Coords = Cast<UMaterialExpressionTextureCoordinate>(
-			UMaterialEditingLibrary::CreateMaterialExpression(M, UMaterialExpressionTextureCoordinate::StaticClass(), -900, -560));
+			UMaterialEditingLibrary::CreateMaterialExpression(M, UMaterialExpressionTextureCoordinate::StaticClass(), -900, -760));
 		Coords->CoordinateIndex = 0;
-		auto* Time = UMaterialEditingLibrary::CreateMaterialExpression(M, UMaterialExpressionTime::StaticClass(), -900, -460);
+		auto* Coords1 = Cast<UMaterialExpressionTextureCoordinate>(
+			UMaterialEditingLibrary::CreateMaterialExpression(M, UMaterialExpressionTextureCoordinate::StaticClass(), -900, -680));
+		Coords1->CoordinateIndex = 1;
+		auto* Time = UMaterialEditingLibrary::CreateMaterialExpression(M, UMaterialExpressionTime::StaticClass(), -900, -600);
+		auto* VertexNormal = UMaterialEditingLibrary::CreateMaterialExpression(M, UMaterialExpressionVertexNormalWS::StaticClass(), -900, -540);
+		auto* Camera = UMaterialEditingLibrary::CreateMaterialExpression(M, UMaterialExpressionCameraVectorWS::StaticClass(), -900, -480);
+		UMaterialExpression* LocalPosition = Interpolated(M, UMaterialExpressionPreSkinnedPosition::StaticClass(), -1100);
+		UMaterialExpression* LocalNormal = Interpolated(M, UMaterialExpressionPreSkinnedNormal::StaticClass(), -1000);
+		auto* ChitinMap = TextureObject(M, Detail.Chitin, -1300);
+		auto* FleshMap = TextureObject(M, Detail.Flesh, -1450);
 
 		auto* Growth = Scalar(M, TEXT("Growth"), 4.0f, -380);
 		auto* Softness = Scalar(M, TEXT("Softness"), 0.08f, -300);
 		auto* GlowIntensity = Scalar(M, TEXT("GlowIntensity"), 12.0f, -220);
 		auto* PulseSpeed = Scalar(M, TEXT("PulseSpeed"), 0.6f, -140);
 		auto* PulseAmount = Scalar(M, TEXT("PulseAmount"), 0.35f, -60);
-		auto* OverlayMode = Scalar(M, TEXT("OverlayMode"), 1.0f, 20);
-		auto* IsGrowth = Scalar(M, TEXT("IsGrowth"), 0.0f, 100);
-		auto* CoatRoughness = Scalar(M, TEXT("ClearCoatRoughness"), 0.06f, 180);
-
-		auto* HostColor = Colour(M, TEXT("HostColor"), FLinearColor(0.50f, 0.43f, 0.41f), -700);
-		auto* InflamedColor = Colour(M, TEXT("InflamedColor"), FLinearColor(0.12f, 0.05f, 0.10f), -560);
-		auto* CarapaceColor = Colour(M, TEXT("CarapaceColor"), FLinearColor(0.018f, 0.015f, 0.022f), -420);
-		auto* CarapaceTint = Colour(M, TEXT("CarapaceTint"), FLinearColor(0.02f, 0.008f, 0.03f), -280);
-		auto* GlowColor = Colour(M, TEXT("GlowColor"), FLinearColor(0.55f, 0.14f, 1.0f), -140);
-
-		auto* EmberColor = Colour(M, TEXT("EmberColor"), FLinearColor(1.0f, 0.32f, 0.06f), 0);
 		auto* BurnSoftness = Scalar(M, TEXT("BurnSoftness"), 40.0f, 260);
+
+		auto* DetailScale = Scalar(M, TEXT("DetailScale"), 12.0f, 900, TEXT("Eclipse Detail"));
+		auto* DetailStrength = Scalar(M, TEXT("DetailStrength"), 0.35f, 980, TEXT("Eclipse Detail"));
+		auto* FleshDetail = Scalar(M, TEXT("FleshDetail"), 1.3f, 1060, TEXT("Eclipse Detail"));
+		auto* CavityStrength = Scalar(M, TEXT("CavityStrength"), 0.6f, 1140, TEXT("Eclipse Detail"));
+		auto* FleshRoughness = Scalar(M, TEXT("FleshRoughness"), 0.32f, 1220, TEXT("Eclipse Flesh"));
+		auto* FleshGlow = Scalar(M, TEXT("FleshGlow"), 0.15f, 1300, TEXT("Eclipse Flesh"));
+
+		auto* GlowColor = Colour(M, TEXT("GlowColor"), FLinearColor(0.55f, 0.14f, 1.0f), -140);
+		auto* EmberColor = Colour(M, TEXT("EmberColor"), FLinearColor(1.0f, 0.32f, 0.06f), 0);
+		auto* FleshColor = Colour(M, TEXT("FleshColor"), FLinearColor(0.10f, 0.025f, 0.05f), 140);
+		auto* ScatterColor = Colour(M, TEXT("ScatterColor"), FLinearColor(0.55f, 0.04f, 0.2f), 420);
 
 		FInputs Common;
 		Common.Add(TEXT("VC"), Vertex);
 		Common.Add(TEXT("VA"), Vertex, TEXT("A"));
 		Common.Add(TEXT("UV"), Coords);
+		Common.Add(TEXT("UV1"), Coords1);
 		Common.Add(TEXT("Growth"), Growth);
 		Common.Add(TEXT("Softness"), Softness);
 		Common.Add(TEXT("BurnSoftness"), BurnSoftness);
@@ -192,7 +362,7 @@ namespace
 		for (int32 Index = 0; Index < 4; ++Index)
 		{
 			const FString Name = FString::Printf(TEXT("Burn%d"), Index);
-			auto* Burn = Colour(M, *Name, FLinearColor(0.0f, 0.0f, 0.0f, 0.0f), 340 + Index * 140);
+			auto* Burn = Colour(M, *Name, FLinearColor(0.0f, 0.0f, 0.0f, 0.0f), 560 + Index * 140);
 			Burn->Group = TEXT("Eclipse Burns");
 			auto* Distance = UMaterialEditingLibrary::CreateMaterialExpression(M, UMaterialExpressionDistance::StaticClass(), -900, 340 + Index * 140);
 			UMaterialEditingLibrary::ConnectMaterialExpressions(World, TEXT(""), Distance, TEXT("A"));
@@ -203,12 +373,25 @@ namespace
 			Common.Add(*RadiusInput, Burn, TEXT("A"));
 		}
 
-		FInputs BaseInputs = Common;
-		BaseInputs.Add(TEXT("HostColor"), HostColor);
-		BaseInputs.Add(TEXT("InflamedColor"), InflamedColor);
-		BaseInputs.Add(TEXT("CarapaceColor"), CarapaceColor);
-		BaseInputs.Add(TEXT("CarapaceTint"), CarapaceTint);
-		BaseInputs.Add(TEXT("OverlayMode"), OverlayMode);
+		FInputs DetailInputs = Common;
+		DetailInputs.Add(TEXT("PL"), LocalPosition);
+		DetailInputs.Add(TEXT("NL"), LocalNormal);
+		DetailInputs.Add(TEXT("Chitin"), ChitinMap);
+		DetailInputs.Add(TEXT("FleshMap"), FleshMap);
+		DetailInputs.Add(TEXT("DetailScale"), DetailScale);
+		DetailInputs.Add(TEXT("CavityStrength"), CavityStrength);
+
+		// Normal: the detail in the mesh's own space, then into the world.
+		FInputs DetailNormalInputs = DetailInputs;
+		DetailNormalInputs.Add(TEXT("DetailStrength"), DetailStrength);
+		DetailNormalInputs.Add(TEXT("FleshDetail"), FleshDetail);
+		auto* DetailNode = Custom(M, TEXT("Eclipse Detail"), FString(Triplanar) + DetailCode, CMOT_Float3, DetailNormalInputs, 700);
+		FInputs NormalInputs;
+		NormalInputs.Add(TEXT("NPW"), LocalToWorld(M, DetailNode, 700));
+		NormalInputs.Add(TEXT("NLW"), LocalToWorld(M, LocalNormal, 800));
+		NormalInputs.Add(TEXT("NW"), VertexNormal);
+		auto* NormalNode = Custom(M, TEXT("Eclipse Normal"), NormalCode, CMOT_Float3, NormalInputs, 750, /*bPrelude*/ false);
+		NormalNode->MaterialExpressionEditorX = 150;
 
 		FInputs EmissiveInputs = Common;
 		EmissiveInputs.Add(TEXT("Time"), Time);
@@ -217,23 +400,72 @@ namespace
 		EmissiveInputs.Add(TEXT("GlowIntensity"), GlowIntensity);
 		EmissiveInputs.Add(TEXT("PulseSpeed"), PulseSpeed);
 		EmissiveInputs.Add(TEXT("PulseAmount"), PulseAmount);
-
-		FInputs OpacityInputs = Common;
-		OpacityInputs.Add(TEXT("OverlayMode"), OverlayMode);
-		OpacityInputs.Add(TEXT("IsGrowth"), IsGrowth);
-
-		auto* BaseNode = Custom(M, TEXT("Eclipse Base Colour"), BaseColorCode, CMOT_Float3, BaseInputs, -600);
+		EmissiveInputs.Add(TEXT("ScatterColor"), ScatterColor);
+		EmissiveInputs.Add(TEXT("FleshGlow"), FleshGlow);
+		EmissiveInputs.Add(TEXT("NW"), VertexNormal);
+		EmissiveInputs.Add(TEXT("V"), Camera);
 		auto* EmissiveNode = Custom(M, TEXT("Eclipse Glow"), EmissiveCode, CMOT_Float3, EmissiveInputs, -350);
-		auto* RoughNode = Custom(M, TEXT("Eclipse Roughness"), RoughnessCode, CMOT_Float1, Common, -150);
-		auto* CoatNode = Custom(M, TEXT("Eclipse Clear Coat"), ClearCoatCode, CMOT_Float1, Common, 0);
-		auto* OpacityNode = Custom(M, TEXT("Eclipse Opacity"), OpacityCode, CMOT_Float1, OpacityInputs, 150);
 
-		UMaterialEditingLibrary::ConnectMaterialProperty(BaseNode, TEXT(""), MP_BaseColor);
+		if (!bFlesh)
+		{
+			auto* OverlayMode = Scalar(M, TEXT("OverlayMode"), 1.0f, 20);
+			auto* IsGrowth = Scalar(M, TEXT("IsGrowth"), 0.0f, 100);
+			auto* CoatRoughness = Scalar(M, TEXT("ClearCoatRoughness"), 0.06f, 180);
+			auto* HostColor = Colour(M, TEXT("HostColor"), FLinearColor(0.50f, 0.43f, 0.41f), -700);
+			auto* InflamedColor = Colour(M, TEXT("InflamedColor"), FLinearColor(0.12f, 0.05f, 0.10f), -560);
+			auto* CarapaceColor = Colour(M, TEXT("CarapaceColor"), FLinearColor(0.018f, 0.015f, 0.022f), -420);
+			auto* CarapaceTint = Colour(M, TEXT("CarapaceTint"), FLinearColor(0.02f, 0.008f, 0.03f), -280);
+
+			FInputs BaseInputs = DetailInputs;
+			BaseInputs.Add(TEXT("HostColor"), HostColor);
+			BaseInputs.Add(TEXT("InflamedColor"), InflamedColor);
+			BaseInputs.Add(TEXT("CarapaceColor"), CarapaceColor);
+			BaseInputs.Add(TEXT("CarapaceTint"), CarapaceTint);
+			BaseInputs.Add(TEXT("FleshColor"), FleshColor);
+			BaseInputs.Add(TEXT("OverlayMode"), OverlayMode);
+
+			FInputs RoughInputs = Common;
+			RoughInputs.Add(TEXT("FleshRoughness"), FleshRoughness);
+
+			FInputs OpacityInputs = Common;
+			OpacityInputs.Add(TEXT("OverlayMode"), OverlayMode);
+			OpacityInputs.Add(TEXT("IsGrowth"), IsGrowth);
+
+			auto* BaseNode = Custom(M, TEXT("Eclipse Base Colour"), FString(Triplanar) + BaseColorCode, CMOT_Float3, BaseInputs, -600);
+			auto* RoughNode = Custom(M, TEXT("Eclipse Roughness"), RoughnessCode, CMOT_Float1, RoughInputs, -150);
+			auto* CoatNode = Custom(M, TEXT("Eclipse Clear Coat"), ClearCoatCode, CMOT_Float1, Common, 0);
+			auto* OpacityNode = Custom(M, TEXT("Eclipse Opacity"), OpacityCode, CMOT_Float1, OpacityInputs, 150);
+
+			UMaterialEditingLibrary::ConnectMaterialProperty(BaseNode, TEXT(""), MP_BaseColor);
+			UMaterialEditingLibrary::ConnectMaterialProperty(RoughNode, TEXT(""), MP_Roughness);
+			UMaterialEditingLibrary::ConnectMaterialProperty(CoatNode, TEXT(""), MP_CustomData0);       // clear coat
+			UMaterialEditingLibrary::ConnectMaterialProperty(CoatRoughness, TEXT(""), MP_CustomData1);  // clear coat roughness
+			UMaterialEditingLibrary::ConnectMaterialProperty(OpacityNode, TEXT(""), MP_OpacityMask);
+		}
+		else
+		{
+			auto* Translucency = Scalar(M, TEXT("Translucency"), 0.65f, 1380, TEXT("Eclipse Flesh"));
+			auto* FleshDeep = Colour(M, TEXT("FleshDeep"), FLinearColor(0.035f, 0.008f, 0.02f), 280);
+
+			FInputs BaseInputs = DetailInputs;
+			BaseInputs.Add(TEXT("FleshColor"), FleshColor);
+			BaseInputs.Add(TEXT("FleshDeep"), FleshDeep);
+			FInputs RoughInputs = DetailInputs;
+			RoughInputs.Add(TEXT("FleshRoughness"), FleshRoughness);
+
+			auto* BaseNode = Custom(M, TEXT("Eclipse Flesh Colour"), FString(Triplanar) + FleshBaseCode, CMOT_Float3, BaseInputs, -600);
+			auto* RoughNode = Custom(M, TEXT("Eclipse Flesh Roughness"), FString(Triplanar) + FleshRoughnessCode, CMOT_Float1,
+				RoughInputs, -150);
+			auto* OpacityNode = Custom(M, TEXT("Eclipse Opacity"), FleshOpacityCode, CMOT_Float1, Common, 150);
+
+			UMaterialEditingLibrary::ConnectMaterialProperty(BaseNode, TEXT(""), MP_BaseColor);
+			UMaterialEditingLibrary::ConnectMaterialProperty(RoughNode, TEXT(""), MP_Roughness);
+			UMaterialEditingLibrary::ConnectMaterialProperty(ScatterColor, TEXT(""), MP_SubsurfaceColor);
+			UMaterialEditingLibrary::ConnectMaterialProperty(Translucency, TEXT(""), MP_Opacity);  // how much light passes through
+			UMaterialEditingLibrary::ConnectMaterialProperty(OpacityNode, TEXT(""), MP_OpacityMask);
+		}
 		UMaterialEditingLibrary::ConnectMaterialProperty(EmissiveNode, TEXT(""), MP_EmissiveColor);
-		UMaterialEditingLibrary::ConnectMaterialProperty(RoughNode, TEXT(""), MP_Roughness);
-		UMaterialEditingLibrary::ConnectMaterialProperty(CoatNode, TEXT(""), MP_CustomData0);       // clear coat
-		UMaterialEditingLibrary::ConnectMaterialProperty(CoatRoughness, TEXT(""), MP_CustomData1);  // clear coat roughness
-		UMaterialEditingLibrary::ConnectMaterialProperty(OpacityNode, TEXT(""), MP_OpacityMask);
+		UMaterialEditingLibrary::ConnectMaterialProperty(NormalNode, TEXT(""), MP_Normal);
 
 		UMaterialEditingLibrary::RecompileMaterial(M);
 		M->MarkPackageDirty();
@@ -276,37 +508,59 @@ namespace
 bool FEclipseMaterials::Ensure(const FString& OutputFolder, bool bRebuild, FEclipseMaterials& Out, FText& OutError)
 {
 	const FString Folder = OutputFolder / TEXT("Materials");
+
+	FDetailTextures Detail;
+	Detail.Chitin = LoadQuietly<UTexture2D>(Folder / ChitinTextureName, ChitinTextureName);
+	Detail.Flesh = LoadQuietly<UTexture2D>(Folder / FleshTextureName, FleshTextureName);
+	if (!Detail.Chitin || bRebuild)
+	{
+		Detail.Chitin = BuildDetailTexture(Folder, ChitinTextureName, eclipse::DetailKind::Chitin, Detail.Chitin);
+	}
+	if (!Detail.Flesh || bRebuild)
+	{
+		Detail.Flesh = BuildDetailTexture(Folder, FleshTextureName, eclipse::DetailKind::Flesh, Detail.Flesh);
+	}
+
+	// 0: carapace (M_EclipseBiomass), 1: soft tissue (M_EclipseFlesh).
+	UMaterial* Masters[2] = {};
+	for (int32 Kind = 0; Kind < 2; ++Kind)
+	{
+		const TCHAR* Name = Kind == 0 ? BiomassName : FleshName;
+		UMaterial* Master = LoadQuietly<UMaterial>(Folder / Name, Name);
+		if (!Master || bRebuild)
+		{
+			Master = BuildMaster(Folder, Kind == 1, Master, Detail, OutError);
+			if (!Master)
+			{
+				return false;
+			}
+		}
+		Masters[Kind] = Master;
+	}
+
 	struct FSpec
 	{
 		const TCHAR* Name;
 		UMaterialInterface* FEclipseMaterials::*Slot;
+		int32 Master;
 		TArray<TPair<FName, float>> Scalars;
 	};
 	const FSpec Specs[] = {
-		{TEXT("MI_Eclipse_Overlay"), &FEclipseMaterials::Overlay,
+		{TEXT("MI_Eclipse_Overlay"), &FEclipseMaterials::Overlay, 0,
 			{TPair<FName, float>(TEXT("OverlayMode"), 1.0f), TPair<FName, float>(TEXT("IsGrowth"), 0.0f)}},
-		{TEXT("MI_Eclipse_Replace"), &FEclipseMaterials::Replace,
+		{TEXT("MI_Eclipse_Replace"), &FEclipseMaterials::Replace, 0,
 			{TPair<FName, float>(TEXT("OverlayMode"), 0.0f), TPair<FName, float>(TEXT("IsGrowth"), 0.0f)}},
-		{TEXT("MI_Eclipse_Growths"), &FEclipseMaterials::Growths,
+		{TEXT("MI_Eclipse_Growths"), &FEclipseMaterials::Growths, 0,
 			{TPair<FName, float>(TEXT("OverlayMode"), 1.0f), TPair<FName, float>(TEXT("IsGrowth"), 1.0f)}},
+		{TEXT("MI_Eclipse_Flesh"), &FEclipseMaterials::Flesh, 1, {}},
 	};
-
-	UMaterial* Master = LoadQuietly<UMaterial>(Folder / MasterName, MasterName);
-	if (!Master || bRebuild)
-	{
-		Master = BuildMaster(Folder, Master, OutError);
-		if (!Master)
-		{
-			return false;
-		}
-	}
 	for (const FSpec& Spec : Specs)
 	{
 		UMaterialInstanceConstant* Existing = LoadQuietly<UMaterialInstanceConstant>(Folder / Spec.Name, Spec.Name);
 		UMaterialInterface* Instance = Existing;
 		if (!Existing || bRebuild)
 		{
-			Instance = BuildInstance(Folder, Spec.Name, Master, Existing, Spec.Scalars);
+			Instance = BuildInstance(Folder, Spec.Name, Masters[Spec.Master], Existing, Spec.Scalars);
 		}
 		if (!Instance)
 		{

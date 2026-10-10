@@ -66,16 +66,19 @@ surface; `--feature-scale` sizes the growths (the corridor defaults to 2).
 | Surface | Swelling, knotted detail, and the displacement of the host | Fractal and ridged noise along the vertex normals. |
 
 Then the growths, as separate geometry on top of the surface. Older tissue (near
-a seed) carries more and larger growths than the advancing front.
+a seed) carries more and larger growths than the advancing front. Wherever a
+growth meets the surface, the tissue swells up around it (**fusion**), so horns,
+roots and claws rise out of the body instead of sitting on it.
 
 | Growth | Where | How |
 |---|---|---|
 | Vein tubes | Along every vein thick enough to see | Dark raised roots swept along the smoothed vein curves; a few stretches glow from within. |
 | Roots | Over the whole corruption | Ropes walked over the surface along the spread's own paths in toward the cores, thickening as they go and turned off-line so they spiral around limbs and columns. |
-| Hearts | At each seed | A glowing orb gripped by a ring of claws; at high coverage a second, wider ring opens it into a maw. Never larger than the curve of the body part it sits on. |
+| Hearts | At each seed | A glowing orb gripped by a ring of claws. At high coverage it opens into a maw: a crater of lumpy lips around a ribbed throat that glows from deep inside, set with teeth and a wider ring of claws. Never larger than the curve of the body part it sits on; other growths keep out of its space. |
 | Vertebrae | Along the thickest vein trunks | Segmented ridges, like a spine under the skin. |
 | Horns | Oldest tissue, near the cores | Scythes swept along the growth: most modest, a rare few several times longer. |
-| Eyes and sacs | Flatter hollows inside plates | Half-buried ellipsoids: eyes with a bright pupil ringed by a dark lid, or sacs glowing toward the crown. |
+| Eyes and sacs | Flatter hollows inside plates | Half-buried ellipsoids in swollen sockets: eyes with a bright pupil ringed by a dark lid, or sacs faintly lit toward the crown. |
+| Sac clusters | Folds and corners | Packed clusters of translucent pods, a few lit faintly from within. |
 | Hanging strands | Undersides and overhangs | Gravity-drooping, swaying tubes ending in a drip; some glow. A strand stops where it would sink back into the host. |
 | Bridges | Across gaps between surfaces that face each other | Sagging catenary tendrils, thinner in the middle; rejected if they would pass through the host. |
 | Membranes | Some bridges | A sagging, two-sided sheet between two neighbouring bridges, torn through with noise-shaped holes whose rims glow. |
@@ -86,9 +89,11 @@ what comes next.
 
 ## Output contract
 
-The `.glb` holds two meshes, `EclipseSurface` (the corrupted host) and
-`EclipseGrowths` (everything added on top), so they can be imported, shaded or
-toggled separately. Both carry the data the Eclipse master material reads:
+The `.glb` holds three meshes: `EclipseSurface` (the corrupted host),
+`EclipseGrowths` (the hard growths on top: horns, claws, roots, strands) and
+`EclipseFlesh` (the soft tissue: hearts, throats, eyes, sacs, membranes, drips,
+for a translucent material). They can be imported, shaded or toggled
+separately. All carry the data the Eclipse materials read:
 
 | Channel | Meaning |
 |---|---|
@@ -98,6 +103,7 @@ toggled separately. Both carry the data the Eclipse master material reads:
 | `COLOR_0.a` | plate tint, a random value per plate for colour variation |
 | `TEXCOORD_0.x` | arrival: 0 at the seed, 1 at the current front, up to 4 beyond it. Animating a threshold over it replays the growth in the material. |
 | `TEXCOORD_0.y` | height the surface was raised, in metres (0 on growths) |
+| `TEXCOORD_1.x` | soft tissue: 1 on the flesh mesh; on the surface, the raw tissue showing in seams and around growths |
 
 On growths, infection is always 1 and arrival is that of the tissue under them
 plus a little, so in a growth animation they emerge just after their ground turns.

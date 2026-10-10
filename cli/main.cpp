@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "eclipse/corruption.h"
+#include "eclipse/detail.h"
 #include "eclipse/export.h"
 #include "eclipse/growths.h"
 #include "eclipse/hosts.h"
@@ -37,10 +38,13 @@ void usage() {
         "  --obj                  also write OBJ files\n"
         "  --feature-scale F      size of spikes, nodules, strands and membranes (default 1, corridor 2)\n"
         "  --no-growths           corrupt the surface only\n"
+        "  --fusion F             how much tissue swells around growths (default 1, 0 off)\n"
         "  --overlay              export only the corrupted shell, to lay over the untouched host\n"
         "  --weld METRES          OBJ hosts: merge vertices this close (default 0.0001)\n"
         "  --max-edge METRES      OBJ hosts: subdivide until no edge is longer (try 0.01)\n"
-        "  --no-preview           skip the PNG previews\n");
+        "  --no-preview           skip the PNG previews\n"
+        "  --focus X,Y,Z,R        preview a close-up of what lies within R of X,Y,Z\n"
+        "  --detail-maps          write the materials' detail maps, lit, as PNGs and stop\n");
 }
 
 bool parseFloats(const std::string& s, std::vector<float>& out) {
@@ -74,6 +78,50 @@ Image hconcat(const std::vector<Image>& images) {
     return out;
 }
 
+// A detail map lit from the upper left, two tiles across to show it repeats.
+Image litDetail(const DetailMap& map) {
+    Image im;
+    im.width = im.height = map.size * 2;
+    im.rgb.resize(static_cast<size_t>(im.width) * im.height * 3);
+    const Vec3 light = normalize(Vec3{-0.5f, 0.6f, 0.62f});
+    for (int y = 0; y < im.height; ++y)
+        for (int x = 0; x < im.width; ++x) {
+            const uint8_t* t = &map.rgba[(static_cast<size_t>(y % map.size) * map.size + (x % map.size)) * 4];
+            float su = t[0] / 127.5f - 1.0f, sv = t[1] / 127.5f - 1.0f;
+            Vec3 n = normalize(Vec3{-su * 0.6f, sv * 0.6f, 1.0f});  // image rows run down
+            float shade = (0.25f + 0.75f * std::max(0.0f, dot(n, light))) * (0.4f + 0.6f * t[3] / 255.0f);
+            for (int c = 0; c < 3; ++c)
+                im.rgb[(static_cast<size_t>(y) * im.width + x) * 3 + c] =
+                    static_cast<uint8_t>(std::lround(std::min(1.0f, shade) * 255.0f));
+        }
+    return im;
+}
+
+// Only the triangles with a corner within radius of centre, for close-ups.
+Mesh cropToSphere(const Mesh& mesh, const Vec3& centre, float radius) {
+    Mesh out;
+    std::vector<int64_t> remap(mesh.vertexCount(), -1);
+    const bool attrs = mesh.attributes.size() == mesh.vertexCount();
+    for (const auto& t : mesh.triangles) {
+        bool near = false;
+        for (uint32_t i : t) near = near || length(mesh.positions[i] - centre) < radius;
+        if (!near) continue;
+        std::array<uint32_t, 3> r{};
+        for (int k = 0; k < 3; ++k) {
+            uint32_t i = t[k];
+            if (remap[i] < 0) {
+                remap[i] = static_cast<int64_t>(out.positions.size());
+                out.positions.push_back(mesh.positions[i]);
+                out.normals.push_back(mesh.normals[i]);
+                if (attrs) out.attributes.push_back(mesh.attributes[i]);
+            }
+            r[k] = static_cast<uint32_t>(remap[i]);
+        }
+        out.triangles.push_back(r);
+    }
+    return out;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -84,6 +132,8 @@ int main(int argc, char** argv) {
     std::vector<float> stages;
     std::vector<Vec3> seeds;
     bool preview = true, obj = false, plateSizeGiven = false, scaleGiven = false, overlay = false;
+    std::vector<float> focus;  // x, y, z, radius: preview only what lies within
+    bool detailMaps = false;
     float weld = 1e-4f, maxEdge = 0.0f;
     FeatureParams features;
 
@@ -109,7 +159,9 @@ int main(int argc, char** argv) {
         else if (a == "--out") outDir = next();
         else if (a == "--obj") obj = true;
         else if (a == "--no-preview") preview = false;
+        else if (a == "--detail-maps") detailMaps = true;
         else if (a == "--no-growths") features.enabled = false;
+        else if (a == "--fusion") features.fusion = std::strtof(next().c_str(), nullptr);
         else if (a == "--overlay") overlay = true;
         else if (a == "--weld") weld = std::strtof(next().c_str(), nullptr);
         else if (a == "--max-edge") maxEdge = std::strtof(next().c_str(), nullptr);
@@ -119,6 +171,8 @@ int main(int argc, char** argv) {
         }
         else if (a == "--stages") {
             if (!parseFloats(next(), stages)) { usage(); return 2; }
+        } else if (a == "--focus") {
+            if (!parseFloats(next(), focus) || focus.size() != 4) { usage(); return 2; }
         } else if (a == "--seed-at") {
             if (!parseFloats(next(), v) || v.size() != 3) { usage(); return 2; }
             seeds.push_back({v[0], v[1], v[2]});
@@ -130,6 +184,16 @@ int main(int argc, char** argv) {
             usage();
             return 2;
         }
+    }
+
+    if (detailMaps) {
+        std::filesystem::create_directories(outDir);
+        for (auto [kind, name] : {std::pair{DetailKind::Chitin, "detail_chitin.png"}, std::pair{DetailKind::Flesh, "detail_flesh.png"}}) {
+            std::string path = (std::filesystem::path(outDir) / name).string();
+            writePng(path, litDetail(makeDetailMap(kind, 512)));
+            std::printf("%s\n", path.c_str());
+        }
+        return 0;
     }
 
     auto t0 = std::chrono::steady_clock::now();
@@ -182,21 +246,25 @@ int main(int argc, char** argv) {
         Mesh shell;
         if (overlay) shell = extractShell(g.surface, 0.0015f);
         const Mesh& exported = overlay ? shell : g.surface;
-        if (!writeGlb(base + ".glb", {{overlay ? "EclipseShell" : "EclipseSurface", &exported}, {"EclipseGrowths", &g.growths}},
+        if (!writeGlb(base + ".glb", {{overlay ? "EclipseShell" : "EclipseSurface", &exported}, {"EclipseGrowths", &g.growths},
+                       {"EclipseFlesh", &g.flesh}},
                       &err)) {
             std::fprintf(stderr, "%s\n", err.c_str());
             return 1;
         }
         Mesh grown = g.surface;
         grown.append(g.growths);
+        grown.append(g.flesh);
         if (obj) writeObj(base + ".obj", grown);
         std::printf("  coverage %.2f -> %s.glb (hash %016llx)\n", p.coverage, base.c_str(),
                     static_cast<unsigned long long>(meshHash(grown)));
-        std::printf("    %zu roots, %zu vein tubes, %zu horns, %zu hearts, %zu vertebrae, %zu nodules, %zu strands, "
-                    "%zu bridges, %zu membranes; %zu growth triangles\n",
-                    g.stats.tendrils, g.stats.veinTubes, g.stats.spikes, g.stats.hearts, g.stats.vertebrae,
-                    g.stats.nodules, g.stats.strands, g.stats.bridges, g.stats.membranes, g.growths.triangleCount());
+        std::printf("    %zu roots, %zu vein tubes, %zu horns, %zu hearts (%zu maws), %zu vertebrae, %zu nodules, "
+                    "%zu sac clusters, %zu strands, %zu bridges, %zu membranes; %zu growth + %zu flesh triangles\n",
+                    g.stats.tendrils, g.stats.veinTubes, g.stats.spikes, g.stats.hearts, g.stats.maws,
+                    g.stats.vertebrae, g.stats.nodules, g.stats.sacs, g.stats.strands, g.stats.bridges,
+                    g.stats.membranes, g.growths.triangleCount(), g.flesh.triangleCount());
         if (preview) {
+            if (!focus.empty()) grown = cropToSphere(grown, {focus[0], focus[1], focus[2]}, focus[3]);
             PreviewOptions opts;
             if (stages.size() > 1) {
                 opts.yaws = {builtin && hostArg == "corridor" ? 30.0f : 0.0f};
