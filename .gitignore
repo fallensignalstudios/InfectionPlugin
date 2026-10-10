@@ -1,0 +1,5 @@
+build*/
+out/
+smoke/
+.vs/
+CMakeUserPresets.json

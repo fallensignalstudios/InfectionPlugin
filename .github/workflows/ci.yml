@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-msvc
+            os: windows-latest
+            werror: "OFF"
+          - name: linux-gcc
+            os: ubuntu-latest
+            cxx: g++
+            werror: "ON"
+          - name: linux-clang
+            os: ubuntu-latest
+            cxx: clang++
+            werror: "ON"
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        shell: bash
+        run: |
+          if [ -n "${{ matrix.cxx }}" ]; then export CXX=${{ matrix.cxx }}; fi
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DECLIPSE_WARNINGS_AS_ERRORS=${{ matrix.werror }}
+      - name: Build
+        run: cmake --build build --config Release --parallel
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Smoke run
+        shell: bash
+        run: |
+          cli=build/eclipse-cli
+          [ -f build/Release/eclipse-cli.exe ] && cli=build/Release/eclipse-cli.exe
+          $cli --host mannequin --cell 0.012 --stages 0.2,0.6 --out smoke
+          ls smoke
