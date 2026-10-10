@@ -10,6 +10,8 @@
 #include <functional>
 #include <iterator>
 #include <map>
+#include <stdexcept>
+#include <system_error>
 #include <string>
 #include <vector>
 
@@ -52,6 +54,17 @@ int failures = 0;
             ++failures;                                                               \
         }                                                                             \
     } while (0)
+
+std::vector<char> readAll(const std::string& path) {
+    std::ifstream f(path, std::ios::binary);
+    return std::vector<char>((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+}
+
+// Never throws: a leftover temp file must not abort the whole run.
+void removeFile(const std::string& path) {
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+}
 
 // Shared hosts are expensive enough to build once.
 const BuiltinHost& mannequin() {
@@ -341,8 +354,7 @@ TEST(glb_is_well_formed) {
     Mesh out = corrupt(m, mannequin().defaultSeeds, GrowthParams{});
     auto path = (std::filesystem::temp_directory_path() / "eclipse_test.glb").string();
     CHECK(writeGlb(path, out));
-    std::ifstream f(path, std::ios::binary);
-    std::vector<char> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    std::vector<char> bytes = readAll(path);
     auto u32 = [&](size_t o) {
         uint32_t v;
         std::memcpy(&v, bytes.data() + o, 4);
@@ -363,7 +375,7 @@ TEST(glb_is_well_formed) {
     CHECK(28 + jsonLen + binLen == bytes.size());
     size_t expected = out.vertexCount() * (12 + 12 + 16 + 8) + out.triangleCount() * 12;
     CHECK(binLen >= expected && binLen < expected + 32);
-    std::filesystem::remove(path);
+    removeFile(path);
 }
 
 TEST(obj_round_trips) {
@@ -374,7 +386,7 @@ TEST(obj_round_trips) {
     CHECK(readObj(path, back));
     CHECK(back.vertexCount() == m.vertexCount());
     CHECK(back.triangles == m.triangles);
-    std::filesystem::remove(path);
+    removeFile(path);
 }
 
 TEST(preview_renders_the_glow) {
@@ -398,7 +410,7 @@ TEST(preview_renders_the_glow) {
     auto path = (std::filesystem::temp_directory_path() / "eclipse_test.png").string();
     CHECK(writePng(path, im));
     CHECK(std::filesystem::file_size(path) > static_cast<uintmax_t>(160 * 180 * 3));
-    std::filesystem::remove(path);
+    removeFile(path);
 }
 
 // Signed volume; positive when a closed mesh's faces point outward.
@@ -542,27 +554,32 @@ TEST(glb_holds_surface_and_growths_as_separate_meshes) {
     const Growth& g = grownMannequin();
     auto path = (std::filesystem::temp_directory_path() / "eclipse_test_multi.glb").string();
     CHECK(writeGlb(path, {{"EclipseSurface", &g.surface}, {"EclipseGrowths", &g.growths}}));
-    std::ifstream f(path, std::ios::binary);
-    std::vector<char> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    std::vector<char> bytes = readAll(path);
     uint32_t jsonLen;
     std::memcpy(&jsonLen, bytes.data() + 12, 4);
     std::string json(bytes.data() + 20, jsonLen);
     CHECK(json.find("\"name\":\"EclipseSurface\",\"primitives\"") != std::string::npos);
     CHECK(json.find("\"name\":\"EclipseGrowths\",\"primitives\"") != std::string::npos);
     CHECK(json.find("\"nodes\":[0,1]") != std::string::npos);
-    f.close();
-    std::filesystem::remove(path);
+    removeFile(path);
     Mesh empty;
     CHECK(!writeGlb(path, {{"Nothing", &empty}}));
 }
 
 int main(int argc, char** argv) {
+    // Unbuffered, so a crash still shows which test was running.
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
     const char* filter = argc > 1 ? argv[1] : nullptr;
     int run = 0;
     for (const auto& t : registry()) {
         if (filter && !std::strstr(t.name, filter)) continue;
         int before = failures;
-        t.body();
+        try {
+            t.body();
+        } catch (const std::exception& e) {
+            std::printf("    EXCEPTION %s\n", e.what());
+            ++failures;
+        }
         ++run;
         std::printf("%s %s\n", failures == before ? "ok  " : "FAIL", t.name);
     }
