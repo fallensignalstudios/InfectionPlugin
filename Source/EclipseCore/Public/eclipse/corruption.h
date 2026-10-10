@@ -106,6 +106,20 @@ ECLIPSECORE_API Mesh corrupt(const Mesh& host, const std::vector<Vec3>& seeds, c
 // came from.
 ECLIPSECORE_API Mesh extractShell(const Mesh& surface, float offset, std::vector<uint32_t>* sourceVertex = nullptr);
 
+// A sparse record of where the corruption is and when it arrived, small
+// enough to keep at runtime for gameplay queries ("how infected is this
+// spot once the growth has played this far?").
+struct InfectionSample {
+    Vec3 position;
+    float arrival = 0;    // as CorruptionAttributes::arrival
+    float infection = 0;  // the strongest of infection and glow nearby
+};
+
+// Poisson-thinned samples of every vertex the corruption touches, at least
+// `spacing` apart, each carrying the earliest arrival and strongest
+// infection of the vertices it stands for.
+ECLIPSECORE_API std::vector<InfectionSample> sampleInfection(const Mesh& surface, float spacing);
+
 // Stable fingerprint of a mesh's geometry and attributes, for regression tests.
 ECLIPSECORE_API uint64_t meshHash(const Mesh& mesh);
 

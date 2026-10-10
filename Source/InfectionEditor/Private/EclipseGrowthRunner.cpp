@@ -2,7 +2,10 @@
 
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "AssetRegistry/AssetRegistryModule.h"
 #include "EclipseFollowerComponent.h"
+#include "EclipseInfectionMap.h"
+#include "EclipseSpreadComponent.h"
 #include "EclipseGrowthSettings.h"
 #include "EclipseMaterials.h"
 #include "EclipseMeshBridge.h"
@@ -15,6 +18,7 @@
 #include "EngineUtils.h"
 #include "MeshDescription.h"
 #include "Misc/ScopedSlowTask.h"
+#include "UObject/Package.h"
 #include "ObjectTools.h"
 #include "ScopedTransaction.h"
 
@@ -137,7 +141,8 @@ namespace
 		return Seeds;
 	}
 
-	void RemovePreviousFollowers(AActor* Host)
+	// Followers and the spread component from an earlier grow.
+	void RemovePreviousInstanceComponents(AActor* Host)
 	{
 		TArray<UActorComponent*> Old;
 		for (UActorComponent* Component : Host->GetInstanceComponents())
@@ -157,6 +162,60 @@ namespace
 			Host->RemoveInstanceComponent(Component);
 			Component->DestroyComponent();
 		}
+	}
+
+	// The sparse where-and-when record the spread component answers gameplay
+	// queries from, in the host actor's space.
+	UEclipseInfectionMap* WriteInfectionMap(const FString& PackagePath, const FString& AssetName,
+		const std::vector<eclipse::InfectionSample>& Samples, const FVector& Origin, const FTransform& ActorTransform,
+		float SpacingCm)
+	{
+		UPackage* Package = CreatePackage(*(PackagePath / AssetName));
+		Package->FullyLoad();
+		if (UObject* Existing = FindObject<UObject>(Package, *AssetName); Existing && !Existing->IsA<UEclipseInfectionMap>())
+		{
+			return nullptr;  // the name is taken by something else; growth works without a map
+		}
+		UEclipseInfectionMap* Map = FindObject<UEclipseInfectionMap>(Package, *AssetName);
+		const bool bCreated = Map == nullptr;
+		if (bCreated)
+		{
+			Map = NewObject<UEclipseInfectionMap>(Package, *AssetName, RF_Public | RF_Standalone | RF_Transactional);
+		}
+		else
+		{
+			Map->Modify();
+		}
+		TArray<FVector3f> Points;
+		TArray<float> Arrival, Infection;
+		Points.Reserve(static_cast<int32>(Samples.size()));
+		for (const eclipse::InfectionSample& Sample : Samples)
+		{
+			const FVector World = EclipseBridge::ToUnreal(Sample.position) + Origin;
+			Points.Add(FVector3f(ActorTransform.InverseTransformPosition(World)));
+			Arrival.Add(Sample.arrival);
+			Infection.Add(Sample.infection);
+		}
+		Map->SetSamples(MoveTemp(Points), MoveTemp(Arrival), MoveTemp(Infection), SpacingCm);
+		if (bCreated)
+		{
+			FAssetRegistryModule::AssetCreated(Map);
+		}
+		Map->MarkPackageDirty();
+		return Map;
+	}
+
+	void PlaceSpread(AActor* Host, UEclipseInfectionMap* Map, float FullGrowth)
+	{
+		Host->Modify();
+		const FName Unique = MakeUniqueObjectName(Host, UEclipseSpreadComponent::StaticClass(), TEXT("EclipseSpread"));
+		UEclipseSpreadComponent* Spread = NewObject<UEclipseSpreadComponent>(Host, Unique, RF_Transactional);
+		Spread->InfectionMap = Map;
+		Spread->FullGrowth = FullGrowth;
+		Spread->Growth = FullGrowth;
+		Spread->ComponentTags.Add(GeneratedTag);
+		Host->AddInstanceComponent(Spread);
+		Spread->RegisterComponent();
 	}
 
 	void PlaceFollower(AActor* Host, USkeletalMeshComponent* Leader, USkeletalMesh* Mesh, const FString& Name)
@@ -299,7 +358,7 @@ namespace EclipseGrowthRunner
 			const FString Base = (bSkeletal ? TEXT("SK_Eclipse_") : TEXT("SM_Eclipse_")) + ObjectTools::SanitizeObjectName(Label);
 			const FName HostTag(*(TEXT("EclipseHost_") + Host.Actor->GetName()));
 			RemovePreviousOutput(World, HostTag);
-			RemovePreviousFollowers(Host.Actor);
+			RemovePreviousInstanceComponents(Host.Actor);
 
 			auto Write = [&](const eclipse::Mesh& Mesh, const eclipse::SkinTable& MeshSkin, const FString& Suffix,
 							 UMaterialInterface* Material, FName Slot) -> bool
@@ -345,6 +404,16 @@ namespace EclipseGrowthRunner
 			if (!bOk)
 			{
 				continue;
+			}
+			{
+				// In Replace mode the full surface was moved into Surface.
+				const eclipse::Mesh& Full = bOverlay ? Result.surface : Surface;
+				const float Spacing = 0.05f * Settings.FeatureScale;
+				UEclipseInfectionMap* Map = WriteInfectionMap(Folder / TEXT("Generated"), TEXT("IM_Eclipse_") + ObjectTools::SanitizeObjectName(Label),
+					eclipse::sampleInfection(Full, Spacing), Source.Origin, Host.Actor->GetActorTransform(), Spacing * 100.0f);
+				// Everything grown, including veins that ran ahead of the front and the
+				// growths that appear just after their tissue, fully revealed.
+				PlaceSpread(Host.Actor, Map, 1.0f + Settings.VeinReach + 0.15f);
 			}
 			if (!bOverlay)
 			{

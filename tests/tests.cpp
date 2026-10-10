@@ -787,6 +787,40 @@ TEST(corruption_rides_the_rig) {
     CHECK(torsoStill);
 }
 
+TEST(infection_samples_cover_the_corruption_sparsely) {
+    GrowthParams p;
+    p.coverage = 0.5f;
+    Mesh surface = corrupt(mannequin().mesh, mannequin().defaultSeeds, p);
+    const float spacing = 0.05f;
+    std::vector<InfectionSample> samples = sampleInfection(surface, spacing);
+    size_t touched = 0;
+    for (const auto& a : surface.attributes) touched += a.infection > 0 || a.glow > 0;
+    CHECK(samples.size() > 50);
+    CHECK(samples.size() * 20 < touched);  // far smaller than the mesh
+    std::vector<Vec3> positions;
+    for (const auto& s : samples) positions.push_back(s.position);
+    // Spaced apart, and every touched vertex has a sample close by whose
+    // record is at least as strong and as early.
+    bool spaced = true;
+    PointGrid grid(positions, spacing);
+    for (size_t i = 0; i < positions.size(); ++i)
+        for (uint32_t j : grid.within(positions[i], spacing * 0.999f)) spaced = spaced && j == i;
+    CHECK(spaced);
+    bool covered = true;
+    for (size_t v = 0; v < surface.vertexCount(); ++v) {
+        const auto& a = surface.attributes[v];
+        if (a.infection <= 0 && a.glow <= 0) continue;
+        int32_t s = grid.nearest(surface.positions[v], spacing * 1.5f);
+        covered = covered && s >= 0 && samples[s].arrival <= a.arrival && samples[s].infection >= std::max(a.infection, a.glow);
+    }
+    CHECK(covered);
+    // The seed's own tissue arrives first.
+    float earliest = 1e9f;
+    for (const auto& s : samples) earliest = std::min(earliest, s.arrival);
+    CHECK(earliest < 0.05f);
+    CHECK(sampleInfection(mannequin().mesh, spacing).empty());  // a clean host has nothing to record
+}
+
 int main(int argc, char** argv) {
     // Unbuffered, so a crash still shows which test was running.
     std::setvbuf(stdout, nullptr, _IONBF, 0);

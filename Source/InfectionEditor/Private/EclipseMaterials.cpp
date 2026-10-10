@@ -7,11 +7,13 @@
 #include "MaterialEditingLibrary.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialExpressionCustom.h"
+#include "Materials/MaterialExpressionDistance.h"
 #include "Materials/MaterialExpressionScalarParameter.h"
 #include "Materials/MaterialExpressionTextureCoordinate.h"
 #include "Materials/MaterialExpressionTime.h"
 #include "Materials/MaterialExpressionVectorParameter.h"
 #include "Materials/MaterialExpressionVertexColor.h"
+#include "Materials/MaterialExpressionWorldPosition.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Misc/FeedbackContext.h"
 #include "UObject/Package.h"
@@ -25,9 +27,19 @@ namespace
 	// Shared by every node: how far the growth has played (reveal) and how
 	// overtaken this point is once revealed (s). UV.x is arrival: 0 at the
 	// seed, 1 at the front. Animate Growth from 0 to about 1.4 to replay it.
+	// Burns (from the Eclipse Spread component) are spheres the corruption is
+	// cut out of, D# the distance to each and R# its radius (0 = unused); the
+	// band where it is burning away glows as embers.
 	const TCHAR* Prelude = TEXT(
-		"float reveal = saturate((Growth - UV.x) / max(Softness, 0.001));\n"
-		"float s = saturate(VC.r) * reveal;\n");
+		"float burn = 1.0;\n"
+		"burn *= R0 > 0.0 ? saturate((D0 - R0) / max(BurnSoftness, 1.0)) : 1.0;\n"
+		"burn *= R1 > 0.0 ? saturate((D1 - R1) / max(BurnSoftness, 1.0)) : 1.0;\n"
+		"burn *= R2 > 0.0 ? saturate((D2 - R2) / max(BurnSoftness, 1.0)) : 1.0;\n"
+		"burn *= R3 > 0.0 ? saturate((D3 - R3) / max(BurnSoftness, 1.0)) : 1.0;\n"
+		"float grown = saturate((Growth - UV.x) / max(Softness, 0.001));\n"
+		"float reveal = grown * burn;\n"
+		"float s = saturate(VC.r) * reveal;\n"
+		"float ember = 4.0 * burn * (1.0 - burn) * grown * step(0.001, VC.r + VC.g);\n");
 
 	const TCHAR* BaseColorCode = TEXT(
 		"float inflamed = 4.0 * s * (1.0 - s);\n"
@@ -38,7 +50,7 @@ namespace
 	// The glow pulses in waves travelling outward from the seed.
 	const TCHAR* EmissiveCode = TEXT(
 		"float pulse = 1.0 + PulseAmount * sin(Time * PulseSpeed * 6.2831853 - UV.x * 8.0);\n"
-		"return GlowColor * GlowIntensity * saturate(VC.g) * reveal * pulse;\n");
+		"return GlowIntensity * (GlowColor * saturate(VC.g) * reveal * pulse + EmberColor * ember);\n");
 
 	const TCHAR* RoughnessCode = TEXT("return lerp(0.7, 0.22, s);\n");
 	const TCHAR* ClearCoatCode = TEXT("return s;\n");
@@ -162,12 +174,34 @@ namespace
 		auto* CarapaceTint = Colour(M, TEXT("CarapaceTint"), FLinearColor(0.02f, 0.008f, 0.03f), -280);
 		auto* GlowColor = Colour(M, TEXT("GlowColor"), FLinearColor(0.55f, 0.14f, 1.0f), -140);
 
+		auto* EmberColor = Colour(M, TEXT("EmberColor"), FLinearColor(1.0f, 0.32f, 0.06f), 0);
+		auto* BurnSoftness = Scalar(M, TEXT("BurnSoftness"), 40.0f, 260);
+
 		FInputs Common;
 		Common.Add(TEXT("VC"), Vertex);
 		Common.Add(TEXT("VA"), Vertex, TEXT("A"));
 		Common.Add(TEXT("UV"), Coords);
 		Common.Add(TEXT("Growth"), Growth);
 		Common.Add(TEXT("Softness"), Softness);
+		Common.Add(TEXT("BurnSoftness"), BurnSoftness);
+
+		// Burn spheres: Burn# holds the centre (RGB, world space) and radius
+		// (A). The distance is taken by the engine's Distance node so it stays
+		// precise in large worlds.
+		auto* World = UMaterialEditingLibrary::CreateMaterialExpression(M, UMaterialExpressionWorldPosition::StaticClass(), -1500, 400);
+		for (int32 Index = 0; Index < 4; ++Index)
+		{
+			const FString Name = FString::Printf(TEXT("Burn%d"), Index);
+			auto* Burn = Colour(M, *Name, FLinearColor(0.0f, 0.0f, 0.0f, 0.0f), 340 + Index * 140);
+			Burn->Group = TEXT("Eclipse Burns");
+			auto* Distance = UMaterialEditingLibrary::CreateMaterialExpression(M, UMaterialExpressionDistance::StaticClass(), -900, 340 + Index * 140);
+			UMaterialEditingLibrary::ConnectMaterialExpressions(World, TEXT(""), Distance, TEXT("A"));
+			UMaterialEditingLibrary::ConnectMaterialExpressions(Burn, TEXT(""), Distance, TEXT("B"));
+			const FString DistanceInput = FString::Printf(TEXT("D%d"), Index);
+			const FString RadiusInput = FString::Printf(TEXT("R%d"), Index);
+			Common.Add(*DistanceInput, Distance);
+			Common.Add(*RadiusInput, Burn, TEXT("A"));
+		}
 
 		FInputs BaseInputs = Common;
 		BaseInputs.Add(TEXT("HostColor"), HostColor);
@@ -179,6 +213,7 @@ namespace
 		FInputs EmissiveInputs = Common;
 		EmissiveInputs.Add(TEXT("Time"), Time);
 		EmissiveInputs.Add(TEXT("GlowColor"), GlowColor);
+		EmissiveInputs.Add(TEXT("EmberColor"), EmberColor);
 		EmissiveInputs.Add(TEXT("GlowIntensity"), GlowIntensity);
 		EmissiveInputs.Add(TEXT("PulseSpeed"), PulseSpeed);
 		EmissiveInputs.Add(TEXT("PulseAmount"), PulseAmount);

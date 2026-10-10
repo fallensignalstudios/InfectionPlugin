@@ -46,6 +46,15 @@ later step.
 
 Next on characters: strands that swing (physics or AnimDynamics), carrying morph targets.
 
-## Phase 5: live spread in levels
+## Phase 5: live spread in levels (written; core tested, engine side not yet built)
 
-- Runtime component that grows corruption during play using the baked arrival data, the PCG framework and instanced growths.
+- Each grow writes an infection map (where and when, sampled every 5 cm × feature scale) and adds an **Eclipse Spread** component to the host.
+- The component plays the spread forward or back at any speed with events at either end, cuts the corruption back with up to four burn spheres that smoulder at the edge, and answers "how infected is this spot now?" for gameplay.
+- The material gains burn spheres (distance taken by the engine's large-world-safe Distance node) and an ember glow.
+
+## Later
+
+- Strands that swing (physics or AnimDynamics) on characters.
+- Seeding new outbreaks at runtime, growing on the fly where the player is.
+- Permanent, unlimited burn scars (a render-target mask instead of four spheres).
+- Tearing the host silhouette at late stage.
