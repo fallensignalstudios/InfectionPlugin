@@ -459,8 +459,9 @@ Mesh corrupt(const Mesh& host, const std::vector<Vec3>& seeds, const GrowthParam
     return growSurface(host, seeds, params).surface;
 }
 
-Mesh extractShell(const Mesh& surface, float offset) {
+Mesh extractShell(const Mesh& surface, float offset, std::vector<uint32_t>* sourceVertex) {
     Mesh shell;
+    if (sourceVertex) sourceVertex->clear();
     if (surface.attributes.size() != surface.positions.size()) return shell;
     auto touched = [&](uint32_t v) { return surface.attributes[v].infection > 0.0f || surface.attributes[v].glow > 0.0f; };
     std::vector<int32_t> remap(surface.positions.size(), -1);
@@ -473,6 +474,7 @@ Mesh extractShell(const Mesh& surface, float offset) {
                 shell.positions.push_back(surface.positions[t[i]] + surface.normals[t[i]] * offset);
                 shell.normals.push_back(surface.normals[t[i]]);
                 shell.attributes.push_back(surface.attributes[t[i]]);
+                if (sourceVertex) sourceVertex->push_back(t[i]);
             }
             r[i] = static_cast<uint32_t>(remap[t[i]]);
         }

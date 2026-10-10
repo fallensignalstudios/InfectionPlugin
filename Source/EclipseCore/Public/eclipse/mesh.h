@@ -55,14 +55,18 @@ struct VertexGraph {
 
 // Merges vertices closer than `tolerance` (game meshes often split vertices
 // along UV or smoothing seams, which would stop the spread at the seam).
-// Drops triangles that collapse. Normals and attributes are discarded.
-ECLIPSECORE_API void weldVertices(Mesh& mesh, float tolerance);
+// Drops triangles that collapse. Normals and attributes are discarded. If
+// remap is given it receives, for every original vertex, its new index.
+ECLIPSECORE_API void weldVertices(Mesh& mesh, float tolerance, std::vector<uint32_t>* remap = nullptr);
 
 // Splits every edge longer than `maxEdge` at its midpoint, repeatedly, until
 // none remain; the surface keeps its exact shape. Corruption detail lives on
 // vertices, so a sparse game mesh must be refined first. Returns false and
-// leaves the mesh untouched if the result would exceed `maxVertices`.
-ECLIPSECORE_API bool subdivideToEdgeLength(Mesh& mesh, float maxEdge, size_t maxVertices);
+// leaves the mesh untouched if the result would exceed `maxVertices`. If
+// parents is given it receives, for each added vertex in order, the two
+// vertices whose midpoint it is (which may themselves be added vertices).
+ECLIPSECORE_API bool subdivideToEdgeLength(Mesh& mesh, float maxEdge, size_t maxVertices,
+                                           std::vector<std::array<uint32_t, 2>>* parents = nullptr);
 
 // One third of the area of every incident triangle.
 ECLIPSECORE_API std::vector<float> vertexAreas(const Mesh& mesh);

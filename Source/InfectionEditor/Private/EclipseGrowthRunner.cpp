@@ -1,12 +1,15 @@
 #include "EclipseGrowthRunner.h"
 
+#include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "EclipseFollowerComponent.h"
 #include "EclipseGrowthSettings.h"
 #include "EclipseMaterials.h"
 #include "EclipseMeshBridge.h"
 #include "EclipseSeed.h"
 #include "Editor.h"
 #include "Engine/Selection.h"
+#include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
 #include "EngineUtils.h"
@@ -18,6 +21,7 @@
 #include "eclipse/corruption.h"
 #include "eclipse/growths.h"
 #include "eclipse/mesh.h"
+#include "eclipse/skin.h"
 
 #define LOCTEXT_NAMESPACE "EclipseGrowthRunner"
 
@@ -29,10 +33,14 @@ namespace
 	constexpr float OverlayLift = 0.0015f;  // metres the shell floats above the host
 	constexpr float WeldTolerance = 0.0001f;
 
+	// A mesh to grow on: a static mesh, or a skeletal mesh whose corruption
+	// must follow its animation.
 	struct FHostTarget
 	{
 		AActor* Actor = nullptr;
-		UStaticMeshComponent* Component = nullptr;
+		UMeshComponent* Component = nullptr;
+		UStaticMeshComponent* Static = nullptr;
+		USkeletalMeshComponent* Skeletal = nullptr;
 	};
 
 	TArray<FHostTarget> SelectedHosts()
@@ -47,10 +55,17 @@ namespace
 			{
 				continue;
 			}
-			UStaticMeshComponent* Component = Actor->FindComponentByClass<UStaticMeshComponent>();
-			if (Component && Component->GetStaticMesh())
+			// A character's skeletal mesh takes precedence over any props on it.
+			USkeletalMeshComponent* Skeletal = Actor->FindComponentByClass<USkeletalMeshComponent>();
+			if (Skeletal && Skeletal->GetSkeletalMeshAsset() && !Skeletal->IsA<UEclipseFollowerComponent>())
 			{
-				Hosts.Add({Actor, Component});
+				Hosts.Add({Actor, Skeletal, nullptr, Skeletal});
+				continue;
+			}
+			UStaticMeshComponent* Static = Actor->FindComponentByClass<UStaticMeshComponent>();
+			if (Static && Static->GetStaticMesh())
+			{
+				Hosts.Add({Actor, Static, Static, nullptr});
 			}
 		}
 		return Hosts;
@@ -91,7 +106,7 @@ namespace
 
 	// Enabled seeds within reach of the host, in a stable order so the same
 	// level always grows the same way.
-	std::vector<eclipse::Vec3> SeedsNear(UWorld* World, const UStaticMeshComponent* Component, const FVector& Origin)
+	std::vector<eclipse::Vec3> SeedsNear(UWorld* World, const UPrimitiveComponent* Component, const FVector& Origin)
 	{
 		const FBox Reach = Component->Bounds.GetBox().ExpandBy(100.0);
 		TArray<AEclipseSeed*> Found;
@@ -109,6 +124,40 @@ namespace
 			Seeds.push_back(EclipseBridge::ToEclipse(Seed->GetActorLocation() - Origin));
 		}
 		return Seeds;
+	}
+
+	void RemovePreviousFollowers(AActor* Host)
+	{
+		TArray<UActorComponent*> Old;
+		for (UActorComponent* Component : Host->GetInstanceComponents())
+		{
+			if (Component && Component->ComponentTags.Contains(GeneratedTag))
+			{
+				Old.Add(Component);
+			}
+		}
+		if (Old.Num() > 0)
+		{
+			Host->Modify();
+		}
+		for (UActorComponent* Component : Old)
+		{
+			Component->Modify();
+			Host->RemoveInstanceComponent(Component);
+			Component->DestroyComponent();
+		}
+	}
+
+	void PlaceFollower(AActor* Host, USkeletalMeshComponent* Leader, USkeletalMesh* Mesh, const FString& Name)
+	{
+		Host->Modify();
+		const FName Unique = MakeUniqueObjectName(Host, UEclipseFollowerComponent::StaticClass(), FName(*Name));
+		UEclipseFollowerComponent* Follower = NewObject<UEclipseFollowerComponent>(Host, Unique, RF_Transactional);
+		Follower->SetSkeletalMeshAsset(Mesh);
+		Follower->ComponentTags.Add(GeneratedTag);
+		Follower->SetupAttachment(Leader);
+		Host->AddInstanceComponent(Follower);
+		Follower->RegisterComponent();
 	}
 
 	void RemovePreviousOutput(UWorld* World, const FName& HostTag)
@@ -162,7 +211,7 @@ namespace EclipseGrowthRunner
 		const TArray<FHostTarget> Hosts = SelectedHosts();
 		if (Hosts.Num() == 0)
 		{
-			return LOCTEXT("NoSelection", "Select one or more static mesh actors to grow on.");
+			return LOCTEXT("NoSelection", "Select one or more static or skeletal mesh actors to grow on.");
 		}
 
 		FEclipseMaterials Materials;
@@ -193,7 +242,11 @@ namespace EclipseGrowthRunner
 			Task.EnterProgressFrame(1.0f, FText::Format(LOCTEXT("Preparing", "Preparing {0}"), FText::FromString(Label)));
 
 			EclipseBridge::FHost Source;
-			if (!EclipseBridge::ReadHost(Host.Component, Source, Error))
+			eclipse::SkinTable Skin;  // skeletal hosts only
+			const bool bSkeletal = Host.Skeletal != nullptr;
+			const bool bRead = bSkeletal ? EclipseBridge::ReadSkeletalHost(Host.Skeletal, Source, Skin, Error)
+										 : EclipseBridge::ReadHost(Host.Static, Source, Error);
+			if (!bRead)
 			{
 				Problems.Add(FString::Printf(TEXT("%s: %s"), *Label, *Error.ToString()));
 				continue;
@@ -204,33 +257,63 @@ namespace EclipseGrowthRunner
 				Problems.Add(FString::Printf(TEXT("%s: no enabled Eclipse Seed within 1 m of it"), *Label));
 				continue;
 			}
-			eclipse::weldVertices(Source.Mesh, WeldTolerance);
-			if (!eclipse::subdivideToEdgeLength(Source.Mesh, Settings.Resolution * 0.01f, static_cast<size_t>(Settings.MaxVertices)))
+			// Weld and refine, carrying bone weights along for skeletal hosts.
+			std::vector<uint32_t> Remap;
+			eclipse::weldVertices(Source.Mesh, WeldTolerance, &Remap);
+			std::vector<std::array<uint32_t, 2>> Parents;
+			if (!eclipse::subdivideToEdgeLength(Source.Mesh, Settings.Resolution * 0.01f, static_cast<size_t>(Settings.MaxVertices), &Parents))
 			{
 				Problems.Add(FString::Printf(TEXT("%s: more than %d vertices at %.1f cm resolution; raise Resolution"),
 					*Label, Settings.MaxVertices, Settings.Resolution));
 				continue;
 			}
+			if (bSkeletal)
+			{
+				Skin = eclipse::skinAfterSubdivision(eclipse::skinAfterWeld(Skin, Remap, Source.Mesh.vertexCount() - Parents.size()), Parents);
+			}
 
 			Task.EnterProgressFrame(2.0f, FText::Format(LOCTEXT("GrowingOne", "Growing over {0} ({1} vertices)"),
 				FText::FromString(Label), FText::AsNumber(static_cast<int64>(Source.Mesh.vertexCount()))));
 			eclipse::Growth Result = eclipse::grow(Source.Mesh, Seeds, Params, Features);
-			const eclipse::Mesh Surface = bOverlay ? eclipse::extractShell(Result.surface, OverlayLift) : std::move(Result.surface);
+			std::vector<uint32_t> ShellSources;
+			const eclipse::Mesh Surface = bOverlay ? eclipse::extractShell(Result.surface, OverlayLift, &ShellSources) : std::move(Result.surface);
+			eclipse::SkinTable SurfaceSkin, GrowthSkin;
+			if (bSkeletal)
+			{
+				SurfaceSkin = bOverlay ? eclipse::skinFromSources(Skin, ShellSources) : Skin;
+				GrowthSkin = eclipse::bindToNearest(Source.Mesh.positions, Skin, Result.growths.positions);
+			}
 
 			Task.EnterProgressFrame(1.0f, LOCTEXT("Writing", "Writing meshes"));
-			const FString Base = TEXT("SM_Eclipse_") + ObjectTools::SanitizeObjectName(Label);
+			const FString Base = (bSkeletal ? TEXT("SK_Eclipse_") : TEXT("SM_Eclipse_")) + ObjectTools::SanitizeObjectName(Label);
 			const FName HostTag(*(TEXT("EclipseHost_") + Host.Actor->GetName()));
 			RemovePreviousOutput(World, HostTag);
+			RemovePreviousFollowers(Host.Actor);
 
-			auto Write = [&](const eclipse::Mesh& Mesh, const FString& Suffix, UMaterialInterface* Material, FName Slot) -> bool
+			auto Write = [&](const eclipse::Mesh& Mesh, const eclipse::SkinTable& MeshSkin, const FString& Suffix,
+							 UMaterialInterface* Material, FName Slot) -> bool
 			{
 				if (Mesh.triangleCount() == 0)
 				{
 					return true;  // nothing of this kind grew; not an error
 				}
 				FMeshDescription Description;
-				EclipseBridge::BuildMeshDescription(Mesh, Source.bFlippedWinding, Slot, Description);
-				UStaticMesh* Asset = EclipseBridge::WriteStaticMesh(Folder / TEXT("Generated"), Base + Suffix,
+				const FString Generated = Folder / TEXT("Generated");
+				if (bSkeletal)
+				{
+					EclipseBridge::BuildMeshDescription(Mesh, Source, /*bMeshLocal*/ true, Slot, Description, &MeshSkin);
+					USkeletalMesh* Asset = EclipseBridge::WriteSkeletalMesh(Host.Skeletal->GetSkeletalMeshAsset(), Generated,
+						Base + Suffix, MoveTemp(Description), Material, Slot, Error);
+					if (!Asset)
+					{
+						Problems.Add(FString::Printf(TEXT("%s: %s"), *Label, *Error.ToString()));
+						return false;
+					}
+					PlaceFollower(Host.Actor, Host.Skeletal, Asset, TEXT("Eclipse") + Suffix);
+					return true;
+				}
+				EclipseBridge::BuildMeshDescription(Mesh, Source, /*bMeshLocal*/ false, Slot, Description);
+				UStaticMesh* Asset = EclipseBridge::WriteStaticMesh(Generated, Base + Suffix,
 					MoveTemp(Description), Material, Slot, Settings.bEnableNanite, Error);
 				if (!Asset)
 				{
@@ -240,9 +323,9 @@ namespace EclipseGrowthRunner
 				PlaceOutput(World, Host.Actor, Source.Origin, Asset, HostTag, Label + TEXT(" Eclipse") + Suffix);
 				return true;
 			};
-			const bool bOk = Write(Surface, bOverlay ? TEXT("_Shell") : TEXT("_Surface"),
+			const bool bOk = Write(Surface, SurfaceSkin, bOverlay ? TEXT("_Shell") : TEXT("_Surface"),
 								 bOverlay ? Materials.Overlay : Materials.Replace, SurfaceSlot) &&
-							 Write(Result.growths, TEXT("_Growths"), Materials.Growths, GrowthsSlot);
+							 Write(Result.growths, GrowthSkin, TEXT("_Growths"), Materials.Growths, GrowthsSlot);
 			if (!bOk)
 			{
 				continue;
@@ -251,6 +334,11 @@ namespace EclipseGrowthRunner
 			{
 				// The corrupted surface stands in for the host entirely.
 				Host.Component->Modify();
+				if (bSkeletal)
+				{
+					// Hidden, the leader must still animate for its followers.
+					Host.Skeletal->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+				}
 				Host.Component->SetVisibility(false);
 			}
 			++Grown;
@@ -274,7 +362,7 @@ namespace EclipseGrowthRunner
 		const TArray<FHostTarget> Hosts = SelectedHosts();
 		if (!World || Hosts.Num() == 0)
 		{
-			return LOCTEXT("NoSeedTarget", "Select a static mesh actor to put a seed on.");
+			return LOCTEXT("NoSeedTarget", "Select a mesh actor to put a seed on.");
 		}
 		FScopedTransaction Transaction(LOCTEXT("SeedTransaction", "Add Eclipse Seed"));
 		for (const FHostTarget& Host : Hosts)

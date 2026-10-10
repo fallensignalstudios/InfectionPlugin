@@ -101,8 +101,10 @@ ECLIPSECORE_API Mesh corrupt(const Mesh& host, const std::vector<Vec3>& seeds, c
 // The part of a corrupted surface that differs from the clean host: every
 // triangle touching infection or glow, lifted `offset` along the normals so
 // it sits just above the original. Rendered over the untouched host with a
-// masked material, the host keeps its own materials everywhere else.
-ECLIPSECORE_API Mesh extractShell(const Mesh& surface, float offset);
+// masked material, the host keeps its own materials everywhere else. If
+// sourceVertex is given it receives the surface vertex each shell vertex
+// came from.
+ECLIPSECORE_API Mesh extractShell(const Mesh& surface, float offset, std::vector<uint32_t>* sourceVertex = nullptr);
 
 // Stable fingerprint of a mesh's geometry and attributes, for regression tests.
 ECLIPSECORE_API uint64_t meshHash(const Mesh& mesh);

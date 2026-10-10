@@ -37,9 +37,14 @@ later step.
 - `M_EclipseBiomass` built in code: clear-coat carapace, inflamed front, pulsing violet glow, and a `Growth` parameter that replays the spread.
 - In the core: vertex welding, crack-free adaptive subdivision and shell extraction, each tested; `--overlay`, `--weld` and `--max-edge` on the CLI.
 
-## Phase 4: skeletal hosts
+## Phase 4: skeletal hosts (written; core tested, engine side not yet built)
 
-- Corrupt skeletal meshes; every new vertex and growth inherits skin weights from the nearest host vertex, so it animates with the rig.
+- Bone weights are carried through welding (first of the merged vertices), subdivision (midpoint blends, exact along edges) and shell extraction (the source vertex's weights).
+- Growths are skinned from the nearest host tissue by an inverse-square blend of up to four vertices, so spans between limbs stretch.
+- Tested with a two-bone rig on the mannequin: the shell and the growths on a swung arm keep their exact offsets from the skin they grew on, and growths on the torso stay put.
+- In Unreal: skeletal hosts are read in their reference pose with their weights; output is a skeletal mesh on the host's skeleton (a one-LOD copy of the host), shown through **Eclipse Follower** components that copy the host's pose.
+
+Next on characters: strands that swing (physics or AnimDynamics), carrying morph targets.
 
 ## Phase 5: live spread in levels
 
