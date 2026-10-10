@@ -86,7 +86,7 @@ namespace
 		TArray<TPair<FName, TPair<UMaterialExpression*, FString>>> List;  // input name -> (expression, its output)
 		void Add(const TCHAR* Name, UMaterialExpression* From, const TCHAR* Output = TEXT(""))
 		{
-			List.Add({FName(Name), {From, FString(Output)}});
+			List.Emplace(FName(Name), MakeTuple(From, FString(Output)));
 		}
 	};
 

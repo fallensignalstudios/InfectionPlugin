@@ -1,5 +1,7 @@
 #pragma once
 
+#include "eclipse/api.h"
+
 #include <cstdint>
 #include <vector>
 
@@ -73,13 +75,13 @@ struct PlateLayout {
     size_t plateCount = 0;
 };
 
-uint32_t nearestVertex(const Mesh& mesh, const Vec3& p);
+ECLIPSECORE_API uint32_t nearestVertex(const Mesh& mesh, const Vec3& p);
 
-SpreadField computeSpread(const Mesh& host, const VertexGraph& graph, const std::vector<Vec3>& seeds,
+ECLIPSECORE_API SpreadField computeSpread(const Mesh& host, const VertexGraph& graph, const std::vector<Vec3>& seeds,
                           const GrowthParams& params);
-VeinNetwork computeVeins(const Mesh& host, const SpreadField& spread,
+ECLIPSECORE_API VeinNetwork computeVeins(const Mesh& host, const SpreadField& spread,
                          const GrowthParams& params);
-PlateLayout computePlates(const Mesh& host, const VertexGraph& graph, const SpreadField& spread,
+ECLIPSECORE_API PlateLayout computePlates(const Mesh& host, const VertexGraph& graph, const SpreadField& spread,
                           const GrowthParams& params);
 
 // The corrupted copy of the host (displaced positions, fresh normals and
@@ -91,18 +93,18 @@ struct SurfaceGrowth {
     PlateLayout plates;
 };
 
-SurfaceGrowth growSurface(const Mesh& host, const std::vector<Vec3>& seeds, const GrowthParams& params);
+ECLIPSECORE_API SurfaceGrowth growSurface(const Mesh& host, const std::vector<Vec3>& seeds, const GrowthParams& params);
 
 // Just the corrupted surface; see growSurface.
-Mesh corrupt(const Mesh& host, const std::vector<Vec3>& seeds, const GrowthParams& params);
+ECLIPSECORE_API Mesh corrupt(const Mesh& host, const std::vector<Vec3>& seeds, const GrowthParams& params);
 
 // The part of a corrupted surface that differs from the clean host: every
 // triangle touching infection or glow, lifted `offset` along the normals so
 // it sits just above the original. Rendered over the untouched host with a
 // masked material, the host keeps its own materials everywhere else.
-Mesh extractShell(const Mesh& surface, float offset);
+ECLIPSECORE_API Mesh extractShell(const Mesh& surface, float offset);
 
 // Stable fingerprint of a mesh's geometry and attributes, for regression tests.
-uint64_t meshHash(const Mesh& mesh);
+ECLIPSECORE_API uint64_t meshHash(const Mesh& mesh);
 
 }  // namespace eclipse

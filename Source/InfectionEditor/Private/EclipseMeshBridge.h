@@ -24,6 +24,8 @@ namespace EclipseBridge
 	{
 		eclipse::Mesh Mesh;          // world space relative to Origin, metres, +Y up
 		FVector Origin = FVector::ZeroVector;
+		// Unreal's triangle order faces the opposite way to Eclipse's (decided
+		// from the asset itself). Pass to BuildMeshDescription when writing.
 		bool bFlippedWinding = false;
 	};
 

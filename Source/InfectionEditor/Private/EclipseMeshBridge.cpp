@@ -7,6 +7,7 @@
 #include "MeshDescription.h"
 #include "StaticMeshAttributes.h"
 #include "UObject/Package.h"
+#include "UObject/UnrealType.h"
 
 #define LOCTEXT_NAMESPACE "EclipseMeshBridge"
 
@@ -66,29 +67,35 @@ namespace EclipseBridge
 			Out.Mesh.positions.push_back(ToEclipse(World - Out.Origin));
 		}
 
-		// Count how many triangles, as wound, face the way the mesh's own
-		// normals say they should; flip them all if most disagree.
+		// Decide, in the mesh's own local space, whether Unreal's triangle
+		// order faces the opposite way to Eclipse's: count triangles whose
+		// winding agrees with the mesh's stated normals. Local space keeps a
+		// mirroring (negative-scale) transform out of the vote.
 		int64 Agree = 0, Disagree = 0;
 		for (const FTriangleID Triangle : Description->Triangles().GetElementIDs())
 		{
 			TArrayView<const FVertexInstanceID> Corners = Description->GetTriangleVertexInstances(Triangle);
 			std::array<uint32_t, 3> Indices{};
-			FVector NormalSum = FVector::ZeroVector;
+			FVector3f Local[3];
+			FVector3f NormalSum = FVector3f::ZeroVector;
 			for (int32 Corner = 0; Corner < 3; ++Corner)
 			{
-				Indices[Corner] = static_cast<uint32_t>(Remap[Description->GetVertexInstanceVertex(Corners[Corner]).GetValue()]);
-				NormalSum += FVector(Normals[Corners[Corner]]);
+				const FVertexID Vertex = Description->GetVertexInstanceVertex(Corners[Corner]);
+				Indices[Corner] = static_cast<uint32_t>(Remap[Vertex.GetValue()]);
+				Local[Corner] = Positions[Vertex];
+				NormalSum += Normals[Corners[Corner]];
 			}
-			const eclipse::Vec3& A = Out.Mesh.positions[Indices[0]];
-			const eclipse::Vec3& B = Out.Mesh.positions[Indices[1]];
-			const eclipse::Vec3& C = Out.Mesh.positions[Indices[2]];
-			const eclipse::Vec3 Wound = eclipse::cross(B - A, C - A);
-			const eclipse::Vec3 Stated = DirectionToEclipse(Transform.TransformVectorNoScale(NormalSum));
-			(eclipse::dot(Wound, Stated) >= 0.0f ? Agree : Disagree) += 1;
+			const eclipse::Vec3 A = DirectionToEclipse(FVector(Local[0]));
+			const eclipse::Vec3 Wound = eclipse::cross(DirectionToEclipse(FVector(Local[1])) - A, DirectionToEclipse(FVector(Local[2])) - A);
+			(eclipse::dot(Wound, DirectionToEclipse(FVector(NormalSum))) >= 0.0f ? Agree : Disagree) += 1;
 			Out.Mesh.triangles.push_back(Indices);
 		}
 		Out.bFlippedWinding = Disagree > Agree;
-		if (Out.bFlippedWinding)
+
+		// The world-space triangles must face outward for the generator. A
+		// mirroring transform reverses them once more on top of the convention.
+		const bool bMirrored = Transform.GetDeterminant() < 0.0;
+		if (Out.bFlippedWinding != bMirrored)
 		{
 			for (auto& Triangle : Out.Mesh.triangles)
 			{
@@ -209,7 +216,7 @@ namespace EclipseBridge
 			}
 		}
 
-		Mesh->Build(/*bInSilent*/ true);
+		// PostEditChange rebuilds the render data (Nanite included) once.
 		Mesh->PostEditChange();
 		if (bCreated)
 		{

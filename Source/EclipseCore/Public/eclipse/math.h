@@ -1,5 +1,7 @@
 #pragma once
 
+#include "eclipse/api.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>

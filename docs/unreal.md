@@ -91,8 +91,10 @@ The vertex data the material reads is listed in the README's output contract.
 ## If it does not compile
 
 The generator core is built and tested on Windows, Linux, GCC, Clang and MSVC
-by CI. The editor module is not: it cannot be compiled without the engine, so
-it has only been written against the 5.x API and reviewed, not built. Engine
+by CI, including as a DLL that exports only the functions marked
+`ECLIPSECORE_API`, the way the Unreal editor links it. The editor module is
+not: it cannot be compiled without the engine, so it has only been written
+against the 5.x API and reviewed, not built. Engine
 APIs it relies on that have moved between versions, and what to change:
 
 | Symptom | Where | Fix |
