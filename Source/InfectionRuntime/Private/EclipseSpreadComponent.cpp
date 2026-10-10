@@ -177,9 +177,9 @@ void UEclipseSpreadComponent::SetGrowth(float NewGrowth)
 void UEclipseSpreadComponent::Burn(FVector WorldLocation, float Radius)
 {
 	const AActor* Owner = GetOwner();
-	if (!Owner)
+	if (!Owner || Radius <= 0.0f)
 	{
-		return;
+		return;  // inactive burns must not evict an active entry from the ring
 	}
 	// Kept in the actor's space, so the burn moves with it.
 	const FVector Local = Owner->GetActorTransform().InverseTransformPosition(WorldLocation);
@@ -212,18 +212,47 @@ float UEclipseSpreadComponent::GetInfectionAt(FVector WorldLocation, float Searc
 	{
 		return 0.0f;
 	}
-	// Everything in the actor's space, where the map and the burns live.
-	const FVector Local = Owner->GetActorTransform().InverseTransformPosition(WorldLocation);
-	const float Scale = FMath::Max(static_cast<float>(Owner->GetActorScale3D().GetAbsMax()), KINDA_SMALL_NUMBER);
-	const float LocalSoftness = BurnSoftness / Scale;
-	for (const FVector4& B : Burns)
+	const FTransform ActorTransform = Owner->GetActorTransform();
+	const FVector Local = ActorTransform.InverseTransformPosition(WorldLocation);
+	const float MinScale = static_cast<float>(ActorTransform.GetScale3D().GetAbsMin());
+	const float MaxScale = static_cast<float>(ActorTransform.GetScale3D().GetAbsMax());
+	const float WorldRadius = FMath::Max(SearchRadius, 0.0f);
+	// The smallest scale gives a conservative local search under nonuniform
+	// scaling. Check its candidates in world space so the long axis does not
+	// stretch the query or the sampling tolerance.
+	const double WorldReach = WorldRadius + InfectionMap->Spacing * MinScale;
+	const double Softness = FMath::Max(BurnSoftness, 1.0f);
+	auto AcceptSample = [&](const FVector3f& Point)
 	{
-		// Burned until the material shows it at least half again.
-		const float Edge = B.W + 0.5f * LocalSoftness;
-		if (FVector::DistSquared(FVector(B.X, B.Y, B.Z), Local) < Edge * Edge)
+		const FVector WorldPoint = ActorTransform.TransformPosition(FVector(Point));
+		if (FVector::DistSquared(WorldPoint, WorldLocation) > WorldReach * WorldReach)
 		{
-			return 0.0f;
+			return false;
 		}
+		// Match the material's product of world-space burn masks at this
+		// sample, rather than testing the query centre against each burn.
+		double BurnMask = 1.0;
+		for (const FVector4& B : Burns)
+		{
+			const double Radius = B.W * MaxScale;
+			if (Radius <= 0.0)
+			{
+				continue;  // the material ignores nonpositive burn radii
+			}
+			const FVector Centre = ActorTransform.TransformPosition(FVector(B.X, B.Y, B.Z));
+			BurnMask *= FMath::Clamp((FVector::Distance(WorldPoint, Centre) - Radius) / Softness, 0.0, 1.0);
+			if (BurnMask < 0.5)
+			{
+				return false;
+			}
+		}
+		return true;
+	};
+	if (MinScale <= SMALL_NUMBER)
+	{
+		// Collapsed axes have no inverse local-distance bound; the world
+		// predicate still gives the correct answer when scanning all samples.
+		return InfectionMap->InfectionAt(Growth - RevealMidpoint, AcceptSample);
 	}
-	return InfectionMap->InfectionAt(Local, SearchRadius / Scale, Growth - RevealMidpoint);
+	return InfectionMap->InfectionAt(Local, WorldRadius / MinScale, Growth - RevealMidpoint, AcceptSample);
 }

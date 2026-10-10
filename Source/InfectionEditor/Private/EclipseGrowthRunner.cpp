@@ -203,7 +203,10 @@ namespace
 			Arrival.Add(Sample.arrival);
 			Infection.Add(Sample.infection);
 		}
-		Map->SetSamples(MoveTemp(Points), MoveTemp(Arrival), MoveTemp(Infection), SpacingCm);
+		// Samples were spaced in world centimetres before their positions were
+		// transformed. Keep a conservative actor-space spacing for the map grid.
+		const float MinScale = FMath::Max(static_cast<float>(ActorTransform.GetScale3D().GetAbsMin()), SMALL_NUMBER);
+		Map->SetSamples(MoveTemp(Points), MoveTemp(Arrival), MoveTemp(Infection), SpacingCm / MinScale);
 		if (bCreated)
 		{
 			FAssetRegistryModule::AssetCreated(Map);

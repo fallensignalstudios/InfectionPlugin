@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
+#include "Templates/Function.h"
 
 #include "EclipseInfectionMap.generated.h"
 
@@ -27,13 +28,21 @@ public:
 	UPROPERTY(VisibleAnywhere, Category = "Eclipse")
 	TArray<float> Infection;
 
-	// Distance between neighbouring points, centimetres.
+	// Conservative distance between neighbouring points in actor-space centimetres.
 	UPROPERTY(VisibleAnywhere, Category = "Eclipse")
 	float Spacing = 5.0f;
 
 	// The strongest infection within Radius of an actor-space point, counting
 	// only what has arrived by Growth. 0 when nothing is there yet.
 	float InfectionAt(const FVector& ActorSpacePoint, float Radius, float Growth) const;
+
+	// The same local search, accepting only samples that also pass a caller's
+	// world-distance or visibility check. The grid remains the broad phase.
+	float InfectionAt(const FVector& ActorSpacePoint, float Radius, float Growth,
+		TFunctionRef<bool(const FVector3f&)> AcceptSample) const;
+
+	// Scan without a local-distance bound when an actor transform is singular.
+	float InfectionAt(float Growth, TFunctionRef<bool(const FVector3f&)> AcceptSample) const;
 
 	void SetSamples(TArray<FVector3f>&& InPoints, TArray<float>&& InArrival, TArray<float>&& InInfection, float InSpacing);
 

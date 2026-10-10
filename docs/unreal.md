@@ -119,6 +119,13 @@ on the host and on the actors attached to it.
 Notes:
 - Burns and queries need the materials from this version: press **Rebuild
   Materials** once if you grew with an earlier one.
+- Saved growth settings retain their old values. To use the revised darker
+  palette, reset the colour, vein and seam settings to their defaults before
+  growing again.
+- Regrow scaled hosts made with earlier live-spread builds to rewrite their
+  infection maps with actor-space sample spacing. Query radii stay in world
+  centimetres, and burns are checked at the nearby samples rather than the
+  query centre.
 - The component changes the materials only in play (PIE, Simulate or a
   build). In the editor, preview a stage by setting `Growth` on the
   `MI_Eclipse_*` instances.
@@ -166,13 +173,14 @@ The generator core is built and tested on Windows, Linux, GCC, Clang and MSVC
 by CI, including as a DLL that exports only the functions marked
 `ECLIPSECORE_API`, the way the Unreal editor links it. On UE 5.8.3, the plugin's
 Editor, Game Development and Game Shipping builds have passed with precompiled
-headers and unity builds disabled (`BuildPlugin -TargetPlatforms=Win64 -StrictIncludes`).
-The 34 standalone tests and two Unreal automation tests also pass. Run the
-Unreal tests with `Automation RunTests Infection.Editor.SkeletalMesh`: they
-check corruption-channel bytes through the skeletal importer, and rebuilding
-an existing asset after changing its host skeleton or reference pose. Both
-tests failed before their fixes. These synthetic fixtures do not qualify the
-appearance or animation of a production character.
+headers and unity builds disabled (`-NoPCH -NoSharedPCH -DisableUnity`, the
+flags used by `BuildPlugin -StrictIncludes`). The 35 standalone tests and six
+Unreal automation tests also pass. Run all Unreal tests with
+`Automation RunTests Infection`: they check skeletal corruption-channel bytes,
+skeletal regeneration after host changes, sparse-map queries, and live-spread
+burns and scaled world distances. The three spread tests failed on the original
+live-spread implementation and pass after the query fixes. These synthetic
+fixtures do not qualify the appearance or animation of a production character.
 
 Engine APIs that have moved between versions, and what to check:
 

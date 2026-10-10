@@ -3,6 +3,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
+#include "UObject/Package.h"
 #include "UObject/StrongObjectPtr.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEclipseInfectionMapQueryTest,
@@ -29,6 +30,10 @@ bool FEclipseInfectionMapQueryTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Far tissue arrives at full growth"), Map->InfectionAt(FVector(95, 0, 0), 1.0f, 1.0f), 0.5f);
 	TestEqual(TEXT("Nothing is found away from the corruption"), Map->InfectionAt(FVector(0, 500, 0), 30.0f, 1.0f), 0.0f);
 	TestEqual(TEXT("The strongest sample in reach wins"), Map->InfectionAt(FVector(50, 0, 0), 10.0f, 1.0f), 1.0f);
+	TestEqual(TEXT("A huge query scans samples without overflowing its grid cell count"),
+		Map->InfectionAt(FVector::ZeroVector, 3.0e9f, 1.0f), 1.0f);
+	TestEqual(TEXT("A query outside grid integer coordinates scans samples directly"),
+		Map->InfectionAt(FVector::ZeroVector, 3.0e10f, 1.0f), 1.0f);
 	return true;
 }
 
