@@ -47,7 +47,7 @@ Vec3 shade(const Vec3& normal, const Vec3& toEye, const CorruptionAttributes& a,
 
     float g = clamp01(a.glow);
     colour += Vec3{0.55f, 0.14f, 1.0f} * (g * 2.0f);
-    colour += Vec3{0.9f, 0.75f, 1.0f} * (std::pow(g, 4.0f) * 1.4f);
+    colour += Vec3{0.9f, 0.75f, 1.0f} * (std::pow(g, 6.0f) * 0.9f);
     return colour;
 }
 

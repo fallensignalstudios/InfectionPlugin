@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include "eclipse/mesh.h"
 
@@ -14,5 +15,13 @@ namespace eclipse {
 //               v = surface height added, in metres
 // glTF is +Y up in metres; Unreal's importer converts to +Z up centimetres.
 bool writeGlb(const std::string& path, const Mesh& mesh, std::string* error = nullptr);
+
+// Several meshes in one file, one node each (for example the corrupted
+// surface and the growths on it). Empty meshes are skipped.
+struct NamedMesh {
+    std::string name;
+    const Mesh* mesh;
+};
+bool writeGlb(const std::string& path, const std::vector<NamedMesh>& meshes, std::string* error = nullptr);
 
 }  // namespace eclipse

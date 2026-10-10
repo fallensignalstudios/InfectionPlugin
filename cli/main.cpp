@@ -14,6 +14,7 @@
 
 #include "eclipse/corruption.h"
 #include "eclipse/export.h"
+#include "eclipse/growths.h"
 #include "eclipse/hosts.h"
 #include "eclipse/preview.h"
 
@@ -34,6 +35,8 @@ void usage() {
         "  --seed-at X,Y,Z        where corruption starts; repeatable (default: host's own)\n"
         "  --out DIR              output directory (default out)\n"
         "  --obj                  also write OBJ files\n"
+        "  --feature-scale F      size of spikes, nodules, strands and membranes (default 1, corridor 2)\n"
+        "  --no-growths           corrupt the surface only\n"
         "  --no-preview           skip the PNG previews\n");
 }
 
@@ -77,7 +80,8 @@ int main(int argc, char** argv) {
     params.coverage = 0.45f;
     std::vector<float> stages;
     std::vector<Vec3> seeds;
-    bool preview = true, obj = false, plateSizeGiven = false;
+    bool preview = true, obj = false, plateSizeGiven = false, scaleGiven = false;
+    FeatureParams features;
 
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
@@ -101,6 +105,11 @@ int main(int argc, char** argv) {
         else if (a == "--out") outDir = next();
         else if (a == "--obj") obj = true;
         else if (a == "--no-preview") preview = false;
+        else if (a == "--no-growths") features.enabled = false;
+        else if (a == "--feature-scale") {
+            features.scale = std::strtof(next().c_str(), nullptr);
+            scaleGiven = true;
+        }
         else if (a == "--stages") {
             if (!parseFloats(next(), stages)) { usage(); return 2; }
         } else if (a == "--seed-at") {
@@ -126,6 +135,7 @@ int main(int argc, char** argv) {
         host = std::move(b.mesh);
         if (seeds.empty()) seeds = b.defaultSeeds;
         if (hostArg == "corridor" && !plateSizeGiven) params.plateSize = 0.18f;  // architecture-scale plates
+        if (hostArg == "corridor" && !scaleGiven) features.scale = 2.0f;
     } else {
         std::string err;
         if (!readObj(hostArg, host, &err)) {
@@ -148,18 +158,24 @@ int main(int argc, char** argv) {
     for (size_t s = 0; s < stages.size(); ++s) {
         GrowthParams p = params;
         p.coverage = stages[s];
-        Mesh grown = corrupt(host, seeds, p);
+        Growth g = grow(host, seeds, p, features);
         char tag[64];
         std::snprintf(tag, sizeof tag, "%s_s%u_c%03d", hostName.c_str(), p.seed, static_cast<int>(p.coverage * 100 + 0.5f));
         std::string base = (std::filesystem::path(outDir) / tag).string();
         std::string err;
-        if (!writeGlb(base + ".glb", grown, &err)) {
+        if (!writeGlb(base + ".glb", {{"EclipseSurface", &g.surface}, {"EclipseGrowths", &g.growths}}, &err)) {
             std::fprintf(stderr, "%s\n", err.c_str());
             return 1;
         }
+        Mesh grown = g.surface;
+        grown.append(g.growths);
         if (obj) writeObj(base + ".obj", grown);
         std::printf("  coverage %.2f -> %s.glb (hash %016llx)\n", p.coverage, base.c_str(),
                     static_cast<unsigned long long>(meshHash(grown)));
+        std::printf("    %zu vein tubes, %zu spikes, %zu nodules, %zu strands, %zu bridges, %zu membranes; "
+                    "%zu growth triangles\n",
+                    g.stats.veinTubes, g.stats.spikes, g.stats.nodules, g.stats.strands, g.stats.bridges,
+                    g.stats.membranes, g.growths.triangleCount());
         if (preview) {
             PreviewOptions opts;
             if (stages.size() > 1) {

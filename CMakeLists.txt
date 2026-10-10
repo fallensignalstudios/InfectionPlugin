@@ -13,6 +13,8 @@ option(ECLIPSE_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 function(eclipse_warnings target)
   if(MSVC)
     target_compile_options(${target} PRIVATE /W4 /permissive- /utf-8)
+    # fopen and friends are used deliberately for portability.
+    target_compile_definitions(${target} PRIVATE _CRT_SECURE_NO_WARNINGS)
     if(ECLIPSE_WARNINGS_AS_ERRORS)
       target_compile_options(${target} PRIVATE /WX)
     endif()
@@ -29,11 +31,14 @@ endfunction()
 add_library(eclipse_core STATIC
   core/src/corruption.cpp
   core/src/export.cpp
+  core/src/geometry.cpp
+  core/src/growths.cpp
   core/src/hosts.cpp
   core/src/mesh.cpp
   core/src/noise.cpp
   core/src/preview.cpp
   core/src/sdf.cpp
+  core/src/spatial.cpp
 )
 target_include_directories(eclipse_core PUBLIC core/include)
 eclipse_warnings(eclipse_core)
