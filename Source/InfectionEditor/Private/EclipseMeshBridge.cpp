@@ -1,13 +1,22 @@
 #include "EclipseMeshBridge.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "BoneWeights.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/SkeletalMesh.h"
+#include "Engine/SkinnedAssetCommon.h"
 #include "Engine/StaticMesh.h"
+#include "LODUtilities.h"
 #include "Materials/MaterialInterface.h"
 #include "MeshDescription.h"
+#include "SkeletalMeshAttributes.h"
 #include "StaticMeshAttributes.h"
 #include "UObject/Package.h"
 #include "UObject/UnrealType.h"
+
+#include <algorithm>
+#include <vector>
 
 #define LOCTEXT_NAMESPACE "EclipseMeshBridge"
 
@@ -34,33 +43,22 @@ namespace EclipseBridge
 		return DirectionToUnreal(Metres) * 100.0;
 	}
 
-	bool ReadHost(UStaticMeshComponent* Component, FHost& Out, FText& OutError)
+	// Positions in world space relative to the transform's location, and
+	// triangles facing outward. Vertices come out in the description's
+	// element order, which ReadSkeletalHost relies on to line up weights.
+	static void ReadDescription(const FMeshDescription& Description, const FTransform& Transform, FHost& Out)
 	{
-		UStaticMesh* StaticMesh = Component ? Component->GetStaticMesh() : nullptr;
-		if (!StaticMesh)
-		{
-			OutError = LOCTEXT("NoMesh", "The selected actor has no static mesh.");
-			return false;
-		}
-		const FMeshDescription* Description = StaticMesh->GetMeshDescription(0);
-		if (!Description || Description->Triangles().Num() == 0)
-		{
-			OutError = FText::Format(LOCTEXT("NoSource", "{0} has no editable source geometry for LOD 0."),
-				FText::FromString(StaticMesh->GetName()));
-			return false;
-		}
-
-		FStaticMeshConstAttributes Attributes(*Description);
+		FStaticMeshConstAttributes Attributes(Description);
 		TVertexAttributesConstRef<FVector3f> Positions = Attributes.GetVertexPositions();
 		TVertexInstanceAttributesConstRef<FVector3f> Normals = Attributes.GetVertexInstanceNormals();
 
-		const FTransform Transform = Component->GetComponentTransform();
 		Out = FHost();
+		Out.Transform = Transform;
 		Out.Origin = Transform.GetLocation();
 
 		TArray<int32> Remap;
-		Remap.Init(INDEX_NONE, Description->Vertices().GetArraySize());
-		for (const FVertexID Vertex : Description->Vertices().GetElementIDs())
+		Remap.Init(INDEX_NONE, Description.Vertices().GetArraySize());
+		for (const FVertexID Vertex : Description.Vertices().GetElementIDs())
 		{
 			Remap[Vertex.GetValue()] = static_cast<int32>(Out.Mesh.positions.size());
 			const FVector World = Transform.TransformPosition(FVector(Positions[Vertex]));
@@ -72,15 +70,15 @@ namespace EclipseBridge
 		// winding agrees with the mesh's stated normals. Local space keeps a
 		// mirroring (negative-scale) transform out of the vote.
 		int64 Agree = 0, Disagree = 0;
-		for (const FTriangleID Triangle : Description->Triangles().GetElementIDs())
+		for (const FTriangleID Triangle : Description.Triangles().GetElementIDs())
 		{
-			TArrayView<const FVertexInstanceID> Corners = Description->GetTriangleVertexInstances(Triangle);
+			TArrayView<const FVertexInstanceID> Corners = Description.GetTriangleVertexInstances(Triangle);
 			std::array<uint32_t, 3> Indices{};
 			FVector3f Local[3];
 			FVector3f NormalSum = FVector3f::ZeroVector;
 			for (int32 Corner = 0; Corner < 3; ++Corner)
 			{
-				const FVertexID Vertex = Description->GetVertexInstanceVertex(Corners[Corner]);
+				const FVertexID Vertex = Description.GetVertexInstanceVertex(Corners[Corner]);
 				Indices[Corner] = static_cast<uint32_t>(Remap[Vertex.GetValue()]);
 				Local[Corner] = Positions[Vertex];
 				NormalSum += Normals[Corners[Corner]];
@@ -102,13 +100,97 @@ namespace EclipseBridge
 				std::swap(Triangle[1], Triangle[2]);
 			}
 		}
+	}
+
+	bool ReadHost(UStaticMeshComponent* Component, FHost& Out, FText& OutError)
+	{
+		UStaticMesh* StaticMesh = Component ? Component->GetStaticMesh() : nullptr;
+		if (!StaticMesh)
+		{
+			OutError = LOCTEXT("NoMesh", "The selected actor has no static mesh.");
+			return false;
+		}
+		const FMeshDescription* Description = StaticMesh->GetMeshDescription(0);
+		if (!Description || Description->Triangles().Num() == 0)
+		{
+			OutError = FText::Format(LOCTEXT("NoSource", "{0} has no editable source geometry for LOD 0."),
+				FText::FromString(StaticMesh->GetName()));
+			return false;
+		}
+		ReadDescription(*Description, Component->GetComponentTransform(), Out);
 		return true;
 	}
 
-	void BuildMeshDescription(const eclipse::Mesh& Mesh, bool bFlipWinding, FName SlotName, FMeshDescription& Out)
+	bool ReadSkeletalHost(USkeletalMeshComponent* Component, FHost& Out, eclipse::SkinTable& OutSkin, FText& OutError)
 	{
+		USkeletalMesh* SkeletalMesh = Component ? Component->GetSkeletalMeshAsset() : nullptr;
+		if (!SkeletalMesh)
+		{
+			OutError = LOCTEXT("NoSkeletalMesh", "The selected actor has no skeletal mesh.");
+			return false;
+		}
+		const FMeshDescription* Description = SkeletalMesh->GetMeshDescription(0);
+		if (!Description || Description->Triangles().Num() == 0)
+		{
+			OutError = FText::Format(LOCTEXT("NoSkeletalSource", "{0} has no editable source geometry for LOD 0."),
+				FText::FromString(SkeletalMesh->GetName()));
+			return false;
+		}
+		// The reference (bind) pose: the generated mesh is skinned against it.
+		ReadDescription(*Description, Component->GetComponentTransform(), Out);
+
+		FSkeletalMeshConstAttributes Attributes(*Description);
+		FSkinWeightsVertexAttributesConstRef Weights = Attributes.GetVertexSkinWeights();
+		OutSkin.clear();
+		OutSkin.reserve(Out.Mesh.positions.size());
+		for (const FVertexID Vertex : Description->Vertices().GetElementIDs())
+		{
+			const auto Influences = Weights.Get(Vertex);
+			std::vector<std::pair<float, uint16_t>> Sorted;
+			for (int32 Index = 0; Index < Influences.Num(); ++Index)
+			{
+				Sorted.push_back({Influences[Index].GetWeight(), static_cast<uint16_t>(Influences[Index].GetBoneIndex())});
+			}
+			std::sort(Sorted.begin(), Sorted.end(), [](const auto& A, const auto& B) { return A.first > B.first; });
+			eclipse::SkinWeights Skin;
+			float Sum = 0.0f;
+			for (const auto& [Weight, Bone] : Sorted)
+			{
+				if (Skin.count == eclipse::SkinWeights::kMaxInfluences || Weight <= 0.0f)
+				{
+					break;
+				}
+				Skin.bone[Skin.count] = Bone;
+				Skin.weight[Skin.count] = Weight;
+				Sum += Weight;
+				++Skin.count;
+			}
+			for (int32 K = 0; K < Skin.count; ++K)
+			{
+				Skin.weight[K] /= Sum;
+			}
+			if (Skin.count == 0)
+			{
+				Skin = eclipse::SkinWeights::single(0);  // unweighted vertices follow the root
+			}
+			OutSkin.push_back(Skin);
+		}
+		return true;
+	}
+
+	void BuildMeshDescription(const eclipse::Mesh& Mesh, const FHost& Host, bool bMeshLocal, FName SlotName,
+		FMeshDescription& Out, const eclipse::SkinTable* Skin)
+	{
+		// Skeletal attributes include the static ones; register exactly once.
+		if (Skin)
+		{
+			FSkeletalMeshAttributes(Out).Register();
+		}
+		else
+		{
+			FStaticMeshAttributes(Out).Register();
+		}
 		FStaticMeshAttributes Attributes(Out);
-		Attributes.Register();
 		TVertexAttributesRef<FVector3f> Positions = Attributes.GetVertexPositions();
 		TVertexInstanceAttributesRef<FVector3f> Normals = Attributes.GetVertexInstanceNormals();
 		TVertexInstanceAttributesRef<FVector4f> Colors = Attributes.GetVertexInstanceColors();
@@ -126,21 +208,55 @@ namespace EclipseBridge
 
 		const bool bHasNormals = Mesh.normals.size() == Mesh.positions.size();
 		const bool bHasAttributes = Mesh.attributes.size() == Mesh.positions.size();
+		check(!Skin || Skin->size() == Mesh.positions.size());
 		// The mesh build stores colours as sRGB bytes and the material reads
 		// those bytes back raw, so hand it the linear value whose sRGB byte is
 		// the number we want the material to see.
 		auto Channel = [](float Value) { return static_cast<uint8>(FMath::Clamp(FMath::RoundToInt(Value * 255.0f), 0, 255)); };
+
+		// Generated geometry is world space relative to the host's location.
+		// A skinned mesh needs it back in the mesh's own space, where its
+		// skeleton's bind pose lives.
+		auto ToSpace = [&](const eclipse::Vec3& P) -> FVector
+		{
+			const FVector World = ToUnreal(P);
+			return bMeshLocal ? Host.Transform.InverseTransformPosition(World + Host.Origin) : World;
+		};
+		auto NormalToSpace = [&](const eclipse::Vec3& N) -> FVector
+		{
+			const FVector World = DirectionToUnreal(N);
+			// Normals transform by the inverse transpose: undo the rotation, then apply the scale.
+			return (bMeshLocal ? Host.Transform.InverseTransformVectorNoScale(World) * Host.Transform.GetScale3D() : World)
+				.GetSafeNormal();
+		};
+		// Mapping back through a mirroring transform reverses winding once more.
+		const bool bFlipWinding = Host.bFlippedWinding != (bMeshLocal && Host.Transform.GetDeterminant() < 0.0);
+		TOptional<FSkinWeightsVertexAttributesRef> SkinWeights;
+		if (Skin)
+		{
+			SkinWeights.Emplace(FSkeletalMeshAttributes(Out).GetVertexSkinWeights());
+		}
 
 		TArray<FVertexInstanceID> Instances;
 		Instances.SetNumUninitialized(VertexCount);
 		for (int32 Index = 0; Index < VertexCount; ++Index)
 		{
 			const FVertexID Vertex = Out.CreateVertex();
-			Positions[Vertex] = FVector3f(ToUnreal(Mesh.positions[Index]));
+			Positions[Vertex] = FVector3f(ToSpace(Mesh.positions[Index]));
 			const FVertexInstanceID Instance = Out.CreateVertexInstance(Vertex);
 			if (bHasNormals)
 			{
-				Normals[Instance] = FVector3f(DirectionToUnreal(Mesh.normals[Index]).GetSafeNormal());
+				Normals[Instance] = FVector3f(NormalToSpace(Mesh.normals[Index]));
+			}
+			if (Skin)
+			{
+				const eclipse::SkinWeights& W = (*Skin)[Index];
+				TArray<UE::AnimationCore::FBoneWeight, TFixedAllocator<eclipse::SkinWeights::kMaxInfluences>> Influences;
+				for (int32 K = 0; K < W.count; ++K)
+				{
+					Influences.Add(UE::AnimationCore::FBoneWeight(static_cast<FBoneIndexType>(W.bone[K]), W.weight[K]));
+				}
+				SkinWeights->Set(Vertex, Influences);
 			}
 			if (bHasAttributes)
 			{
@@ -217,6 +333,96 @@ namespace EclipseBridge
 		}
 
 		// PostEditChange rebuilds the render data (Nanite included) once.
+		Mesh->PostEditChange();
+		if (bCreated)
+		{
+			FAssetRegistryModule::AssetCreated(Mesh);
+		}
+		Mesh->MarkPackageDirty();
+		return Mesh;
+	}
+
+	USkeletalMesh* WriteSkeletalMesh(USkeletalMesh* Template, const FString& PackagePath, const FString& AssetName,
+		FMeshDescription&& Description, UMaterialInterface* Material, FName SlotName, FText& OutError)
+	{
+		if (Template->GetMeshClothingAssets().Num() > 0)
+		{
+			OutError = FText::Format(LOCTEXT("Clothing",
+				"{0} has clothing assets, which cannot follow regenerated geometry. Grow on a copy without clothing."),
+				FText::FromString(Template->GetName()));
+			return nullptr;
+		}
+		const FString PackageName = PackagePath / AssetName;
+		UPackage* Package = CreatePackage(*PackageName);
+		if (!Package)
+		{
+			OutError = FText::Format(LOCTEXT("NoSkeletalPackage", "Could not create package {0}."), FText::FromString(PackageName));
+			return nullptr;
+		}
+		Package->FullyLoad();
+
+		// Start from a copy of the host's mesh: the same skeleton, reference
+		// pose and physics asset, so bone indices carry over unchanged.
+		USkeletalMesh* Mesh = FindObject<USkeletalMesh>(Package, *AssetName);
+		const bool bCreated = Mesh == nullptr;
+		if (bCreated)
+		{
+			Mesh = DuplicateObject<USkeletalMesh>(Template, Package, *AssetName);
+			Mesh->SetFlags(RF_Public | RF_Standalone | RF_Transactional);
+		}
+		else
+		{
+			Mesh->Modify();
+		}
+
+		// One LOD, no morph targets: the copy's other LODs and shapes belong
+		// to the host's geometry, not this.
+		while (Mesh->GetLODNum() > 1)
+		{
+			FSkeletalMeshUpdateContext Context;
+			Context.SkeletalMesh = Mesh;
+			FLODUtilities::RemoveLOD(Context, Mesh->GetLODNum() - 1);
+		}
+		Mesh->UnregisterAllMorphTarget();
+		// Nothing inherited from the host may reshape the generated geometry.
+		Mesh->SetLODSettings(nullptr);
+		Mesh->GetSkinWeightProfiles().Empty();
+		// The corruption data lives in vertex colours; character meshes often
+		// have them switched off.
+		Mesh->SetHasVertexColors(true);
+		Mesh->SetVertexColorGuid(FGuid::NewGuid());
+
+		TArray<FSkeletalMaterial> Materials;
+		Materials.Add(FSkeletalMaterial(Material, SlotName, SlotName));
+		Mesh->SetMaterials(Materials);
+		if (FSkeletalMeshLODInfo* LOD = Mesh->GetLODInfo(0))
+		{
+			LOD->LODMaterialMap.Empty();
+			LOD->BuildSettings.bRecomputeNormals = false;
+			LOD->BuildSettings.bRecomputeTangents = true;
+			LOD->BuildSettings.bUseMikkTSpace = true;
+			LOD->BuildSettings.bUseFullPrecisionUVs = true;  // UV 0 carries arrival times
+			LOD->ReductionSettings = FSkeletalMeshOptimizationSettings();  // never decimate LOD 0
+		}
+
+		// The skeleton, in the description too, as imported skeletal meshes
+		// carry it; bone indices are the asset's, as the weights expect.
+		{
+			FSkeletalMeshAttributes Attributes(Description);
+			const FReferenceSkeleton& Reference = Mesh->GetRefSkeleton();
+			const TArray<FTransform>& Pose = Reference.GetRefBonePose();
+			for (int32 Bone = 0; Bone < Reference.GetRawBoneNum(); ++Bone)
+			{
+				const FBoneID Id = Attributes.CreateBone();
+				Attributes.GetBoneNames().Set(Id, Reference.GetBoneName(Bone));
+				Attributes.GetBoneParentIndices().Set(Id, Reference.GetParentIndex(Bone));
+				Attributes.GetBonePoses().Set(Id, Pose[Bone]);
+			}
+		}
+
+		FMeshDescription* Target = Mesh->CreateMeshDescription(0);
+		*Target = MoveTemp(Description);
+		Mesh->CommitMeshDescription(0);
 		Mesh->PostEditChange();
 		if (bCreated)
 		{

@@ -95,7 +95,7 @@ VertexGraph VertexGraph::twoRing() const {
     return g;
 }
 
-void weldVertices(Mesh& mesh, float tolerance) {
+void weldVertices(Mesh& mesh, float tolerance, std::vector<uint32_t>* remapOut) {
     const size_t n = mesh.positions.size();
     const float cell = std::max(tolerance, 1e-9f);
     auto key = [](int64_t x, int64_t y, int64_t z) {
@@ -137,9 +137,11 @@ void weldVertices(Mesh& mesh, float tolerance) {
     mesh.triangles = std::move(triangles);
     mesh.normals.clear();
     mesh.attributes.clear();
+    if (remapOut) *remapOut = std::move(remap);
 }
 
-bool subdivideToEdgeLength(Mesh& mesh, float maxEdge, size_t maxVertices) {
+bool subdivideToEdgeLength(Mesh& mesh, float maxEdge, size_t maxVertices,
+                           std::vector<std::array<uint32_t, 2>>* parentsOut) {
     if (maxEdge <= 0.0f) return false;
     auto edgeKey = [](uint32_t a, uint32_t b) {
         return a < b ? (static_cast<uint64_t>(a) << 32) | b : (static_cast<uint64_t>(b) << 32) | a;
@@ -159,6 +161,7 @@ bool subdivideToEdgeLength(Mesh& mesh, float maxEdge, size_t maxVertices) {
 
     std::vector<Vec3> positions = mesh.positions;
     std::vector<std::array<uint32_t, 3>> triangles = mesh.triangles;
+    std::vector<std::array<uint32_t, 2>> parents;
     std::unordered_map<uint64_t, std::vector<uint32_t>> edgeTriangles;
     auto addEdge = [&](uint32_t a, uint32_t b, uint32_t t) { edgeTriangles[edgeKey(a, b)].push_back(t); };
     auto removeEdgeTriangle = [&](uint32_t a, uint32_t b, uint32_t t) {
@@ -189,6 +192,7 @@ bool subdivideToEdgeLength(Mesh& mesh, float maxEdge, size_t maxVertices) {
         if (positions.size() >= maxVertices) return false;
         const uint32_t m = static_cast<uint32_t>(positions.size());
         positions.push_back((positions[a] + positions[b]) * 0.5f);
+        parents.push_back({a, b});
         std::vector<uint32_t> touching = it->second;
         edgeTriangles.erase(it);
         for (uint32_t t : touching) {
@@ -215,6 +219,7 @@ bool subdivideToEdgeLength(Mesh& mesh, float maxEdge, size_t maxVertices) {
     mesh.triangles = std::move(triangles);
     mesh.attributes.clear();
     mesh.computeNormals();
+    if (parentsOut) *parentsOut = std::move(parents);
     return true;
 }
 

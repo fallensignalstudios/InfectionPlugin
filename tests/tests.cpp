@@ -23,6 +23,7 @@
 #include "eclipse/preview.h"
 #include "eclipse/random.h"
 #include "eclipse/sdf.h"
+#include "eclipse/skin.h"
 #include "eclipse/spatial.h"
 
 using namespace eclipse;
@@ -653,6 +654,137 @@ TEST(shell_holds_only_the_corruption_lifted_off_the_host) {
     CHECK(lifted);
     Mesh clean = mannequin().mesh;
     CHECK(extractShell(clean, 0.002f).vertexCount() == 0);  // no attributes, nothing to lift
+}
+
+TEST(skin_blend_merges_caps_and_normalises) {
+    SkinWeights a = SkinWeights::single(3), b;
+    b.count = 2;
+    b.bone = {3, 7};
+    b.weight = {0.5f, 0.5f};
+    const SkinWeights* in[2] = {&a, &b};
+    const float f[2] = {1.0f, 1.0f};
+    SkinWeights m = blendSkin(in, f, 2);
+    CHECK(m.count == 2);
+    CHECK(m.bone[0] == 3 && std::fabs(m.weight[0] - 0.75f) < 1e-6f);
+    CHECK(m.bone[1] == 7 && std::fabs(m.weight[1] - 0.25f) < 1e-6f);
+    // Twelve bones in, the strongest eight out, still summing to one.
+    std::vector<SkinWeights> many;
+    std::vector<float> factors;
+    for (uint16_t i = 0; i < 12; ++i) {
+        many.push_back(SkinWeights::single(i));
+        factors.push_back(static_cast<float>(i + 1));
+    }
+    std::vector<const SkinWeights*> ptrs;
+    for (const auto& w : many) ptrs.push_back(&w);
+    SkinWeights capped = blendSkin(ptrs.data(), factors.data(), ptrs.size());
+    CHECK(capped.count == SkinWeights::kMaxInfluences);
+    CHECK(capped.bone[0] == 11 && capped.bone[7] == 4);
+    float sum = 0;
+    for (int k = 0; k < capped.count; ++k) sum += capped.weight[k];
+    CHECK(std::fabs(sum - 1.0f) < 1e-5f);
+}
+
+TEST(skinning_survives_welding_and_subdivision) {
+    // Bone 0 owns the bottom of the cube, bone 1 the top.
+    Mesh m = splitCube();
+    SkinTable skin;
+    for (const auto& p : m.positions) skin.push_back(SkinWeights::single(p.y > 0.5f ? 1 : 0));
+    std::vector<uint32_t> remap;
+    weldVertices(m, 1e-4f, &remap);
+    skin = skinAfterWeld(skin, remap, m.vertexCount());
+    CHECK(skin.size() == 8);
+    std::vector<std::array<uint32_t, 2>> parents;
+    CHECK(subdivideToEdgeLength(m, 0.2f, 100000, &parents));
+    CHECK(parents.size() == m.vertexCount() - 8);
+    skin = skinAfterSubdivision(skin, parents);
+    CHECK(skin.size() == m.vertexCount());
+    // Along a vertical edge the weight of bone 1 is the height: midpoint
+    // blending reproduces linear interpolation exactly.
+    bool linear = true;
+    for (size_t v = 0; v < m.vertexCount(); ++v) {
+        const Vec3& p = m.positions[v];
+        bool onVerticalEdge = (p.x < 1e-6f || p.x > 1 - 1e-6f) && (p.z < 1e-6f || p.z > 1 - 1e-6f);
+        if (!onVerticalEdge) continue;
+        float top = 0;
+        for (int k = 0; k < skin[v].count; ++k)
+            if (skin[v].bone[k] == 1) top = skin[v].weight[k];
+        linear = linear && std::fabs(top - p.y) < 1e-4f;
+    }
+    CHECK(linear);
+}
+
+// Linear blend skinning with bone 0 fixed and bone 1 rotated about a pivot.
+struct TwoBoneRig {
+    Vec3 pivot;
+    float angle;
+    Vec3 rotate(const Vec3& p) const {  // about +z through the pivot
+        Vec3 d = p - pivot;
+        float c = std::cos(angle), s = std::sin(angle);
+        return pivot + Vec3{c * d.x - s * d.y, s * d.x + c * d.y, d.z};
+    }
+    Vec3 deform(const Vec3& p, const SkinWeights& w) const {
+        Vec3 out{0, 0, 0};
+        for (int k = 0; k < w.count; ++k) out += (w.bone[k] == 1 ? rotate(p) : p) * w.weight[k];
+        return out;
+    }
+};
+
+TEST(corruption_rides_the_rig) {
+    // The mannequin's right arm on bone 1, blended across the shoulder.
+    const Mesh& host = mannequin().mesh;
+    SkinTable skin;
+    for (const auto& p : host.positions) {
+        float arm = smoothstep(0.15f, 0.25f, p.x) * smoothstep(1.2f, 1.3f, p.y);
+        SkinWeights w;
+        w.count = 0;
+        if (1 - arm > 0) w.bone[w.count] = 0, w.weight[w.count++] = 1 - arm;
+        if (arm > 0) w.bone[w.count] = 1, w.weight[w.count++] = arm;
+        skin.push_back(w);
+    }
+    GrowthParams p;
+    p.coverage = 0.85f;
+    Growth g = grow(host, mannequin().defaultSeeds, p, FeatureParams{});
+    std::vector<uint32_t> sources;
+    Mesh shell = extractShell(g.surface, 0.0015f, &sources);
+    SkinTable shellSkin = skinFromSources(skin, sources);
+    SkinTable growthSkin = bindToNearest(host.positions, skin, g.growths.positions);
+    CHECK(shellSkin.size() == shell.vertexCount());
+    CHECK(growthSkin.size() == g.growths.vertexCount());
+
+    TwoBoneRig rig{{0.19f, 1.425f, 0.0f}, -1.05f};  // swing the arm down 60 degrees
+    // Every shell vertex keeps its exact offset from the host vertex it grew from.
+    bool shellRigid = true;
+    for (size_t i = 0; i < shell.vertexCount(); ++i) {
+        const Vec3& h = host.positions[sources[i]];
+        float before = length(shell.positions[i] - h);
+        float after = length(rig.deform(shell.positions[i], shellSkin[i]) - rig.deform(h, skin[sources[i]]));
+        if (host.positions[sources[i]].x > 0.3f) shellRigid = shellRigid && std::fabs(after - before) < 1e-4f;
+    }
+    CHECK(shellRigid);
+    // Growths on the forearm and hand move with it, as one piece.
+    PointGrid grid(host.positions, 0.02f);
+    size_t checked = 0;
+    bool growthsRigid = true;
+    for (size_t i = 0; i < g.growths.vertexCount(); i += 5) {
+        const Vec3& q = g.growths.positions[i];
+        if (q.x < 0.45f) continue;
+        int32_t h = grid.nearest(q, 0.3f);
+        if (h < 0) continue;
+        float before = length(q - host.positions[h]);
+        float after = length(rig.deform(q, growthSkin[i]) - rig.deform(host.positions[h], skin[h]));
+        growthsRigid = growthsRigid && std::fabs(after - before) < 1e-4f;
+        ++checked;
+    }
+    CHECK(checked > 500);
+    CHECK(growthsRigid);
+    // Growths on the torso stay put.
+    bool torsoStill = true;
+    for (size_t i = 0; i < g.growths.vertexCount(); i += 5) {
+        const Vec3& q = g.growths.positions[i];
+        if (std::fabs(q.x) > 0.1f) continue;
+        torsoStill = torsoStill && length(rig.deform(q, growthSkin[i]) - q) < 1e-5f;
+    }
+    CHECK(torsoStill);
 }
 
 int main(int argc, char** argv) {

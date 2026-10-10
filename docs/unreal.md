@@ -59,6 +59,38 @@ rather than exceed **Max Vertices**.
 Vertices that are split along UV or smoothing seams are welded first, so the
 spread crosses those seams. Generated meshes have Nanite enabled by default.
 
+## Characters (skeletal meshes)
+
+Select an actor with a skeletal mesh and grow as usual. The corruption is
+grown over the mesh's **reference pose**, so keep the character in its
+reference pose while placing seeds (no animation assigned in the editor), and
+seeds go where the corruption should start on that pose.
+
+The result is two skeletal meshes on the host's own skeleton,
+`SK_Eclipse_<Host>_Shell` and `SK_Eclipse_<Host>_Growths`, each a copy of the
+host mesh reduced to one LOD and one material. Every vertex carries bone
+weights: the shell takes the weights of the skin it lies on, and growths blend
+the weights of the tissue nearest them, so a strand follows the limb it hangs
+from and a membrane between arm and torso stretches with both.
+
+In the level they are added to the host actor as **Eclipse Follower**
+components, attached under its skeletal mesh. A follower copies its parent's
+pose every frame, so the corruption plays whatever animation the character
+plays. To use it on a character Blueprint, add an *Eclipse Follower* component
+under the character's Mesh and set its Skeletal Mesh Asset to the generated mesh.
+
+Limits for now:
+- Hosts with clothing assets are refused; grow on a copy without clothing.
+- Growths are rigid with the bone that carries them: strands do not swing or
+  hang with gravity as the character moves. Physics on strands is a later step.
+- The host's morph targets are not carried over to the corruption.
+- Growing places followers on level actors. On a character Blueprint whose
+  skeletal mesh is added in the Blueprint itself (not the inherited Mesh),
+  the construction script may rebuild that component and orphan the
+  followers; add the follower in the Blueprint instead, as above.
+
+![A grown arm swung down through the transferred weights](previews/skinned_pose.jpg)
+
 ## The material
 
 The first grow creates `<Output Folder>/Materials/M_EclipseBiomass` and three
@@ -92,9 +124,9 @@ The vertex data the material reads is listed in the README's output contract.
 
 The generator core is built and tested on Windows, Linux, GCC, Clang and MSVC
 by CI, including as a DLL that exports only the functions marked
-`ECLIPSECORE_API`, the way the Unreal editor links it. The editor module is
-not: it cannot be compiled without the engine, so it has only been written
-against the 5.x API and reviewed, not built. Engine
+`ECLIPSECORE_API`, the way the Unreal editor links it. The editor module cannot
+be built without the engine; the static-mesh path has been built and run in
+UE 5.8, the skeletal path (characters) only written and reviewed so far. Engine
 APIs it relies on that have moved between versions, and what to change:
 
 | Symptom | Where | Fix |
@@ -104,5 +136,6 @@ APIs it relies on that have moved between versions, and what to change:
 | `UMaterialEditingLibrary` missing | `InfectionEditor.Build.cs` | It lives in the `MaterialEditor` module, already listed. |
 | Material settings not applied | `EclipseMaterials.cpp` | Blend mode and two-sided are set by property name; check the names `BlendMode` and `TwoSided` on `UMaterial`. |
 | Nanite not enabled on outputs | `EclipseMeshBridge.cpp` | Set by property name `NaniteSettings.bEnabled`; enable it in the mesh editor meanwhile. |
+| Skeletal output is empty or fails to commit | `EclipseMeshBridge.cpp`, `WriteSkeletalMesh` | The mesh description is built fresh with skin weights but no bone list; if the engine wants bones in the description, copy them from the host's description before committing. |
 
 Paste the compiler output into a session and it can be fixed quickly.

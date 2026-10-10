@@ -49,7 +49,7 @@ void SEclipseGrowthPanel::Construct(const FArguments& InArgs)
 			+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(2.0f)
 			[
 				Button(LOCTEXT("Grow", "Grow on Selected"),
-					LOCTEXT("GrowTip", "Grow corruption over each selected static mesh from the Eclipse Seeds near it."),
+					LOCTEXT("GrowTip", "Grow corruption over each selected static or skeletal mesh from the Eclipse Seeds near it."),
 					FOnClicked::CreateSP(this, &SEclipseGrowthPanel::OnGrow))
 			]
 			+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(2.0f)

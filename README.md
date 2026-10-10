@@ -10,8 +10,8 @@ Engine 5.8.
 ![Growth stages on the test mannequin](docs/previews/mannequin_stages.jpg)
 
 This repository is an **Unreal Engine 5.8 plugin**: clone it into a project's
-`Plugins` folder and grow corruption over meshes in the level from
-**Tools → Eclipse Growth**. See [docs/unreal.md](docs/unreal.md).
+`Plugins` folder and grow corruption over static meshes and animated
+characters in the level from **Tools → Eclipse Growth**. See [docs/unreal.md](docs/unreal.md).
 
 The generator at its heart is standard C++20 with no third-party dependency, so
 the same sources build into the plugin, a command-line tool and the tests.
@@ -107,7 +107,7 @@ glTF uses +Y up and metres. Unreal's glTF importer converts to +Z up and centime
 ```
 InfectionPlugin.uplugin   the plugin descriptor
 Source/EclipseCore/       the generator (Public/eclipse, Private): plain C++, no engine headers
-Source/InfectionRuntime/  the Eclipse Seed actor
+Source/InfectionRuntime/  the Eclipse Seed actor and the Eclipse Follower component
 Source/InfectionEditor/   the Eclipse Growth panel, mesh conversion, assets and materials
 Resources/                plugin icon
 cli/                      eclipse-cli
