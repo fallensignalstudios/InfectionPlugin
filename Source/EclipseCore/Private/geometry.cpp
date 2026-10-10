@@ -34,45 +34,62 @@ std::vector<Vec3> sampleQuadratic(const Vec3& a, const Vec3& control, const Vec3
     return out;
 }
 
-void appendTube(Mesh& mesh, const std::vector<Vec3>& points, const std::vector<float>& radii,
-                const std::vector<CorruptionAttributes>& attributes, int sides, bool capped, const TubeStyle& style) {
-    if (points.size() < 2 || sides < 3) return;
+void appendTube(Mesh& mesh, const std::vector<Vec3>& inputPoints, const std::vector<float>& inputRadii,
+                const std::vector<CorruptionAttributes>& inputAttributes, int sides, bool capped, const TubeStyle& style) {
+    if (inputPoints.size() < 2 || sides < 3 || inputRadii.size() != inputPoints.size() ||
+        inputAttributes.size() != inputPoints.size()) return;
+    std::vector<Vec3> resampledPoints;
+    std::vector<float> resampledRadii;
+    std::vector<CorruptionAttributes> resampledAttributes;
     // Rings and knots need several samples each along the tube, or they
     // alias away: resample finer where the caller's points are too sparse.
     float spacing = 0.0f;
     if (style.rings > 0.0f) spacing = style.ringSpacing / 3.0f;
     if (style.lumps > 0.0f) spacing = spacing > 0.0f ? std::min(spacing, style.lumpSize / 2.0f) : style.lumpSize / 2.0f;
-    if (spacing > 0.0f) {
-        float total = 0.0f, widest = 0.0f;
-        for (size_t i = 1; i < points.size(); ++i) {
-            float l = length(points[i] - points[i - 1]);
+    if (spacing > 0.0f && std::isfinite(spacing)) {
+        auto segmentLength = [](const Vec3& a, const Vec3& b) {
+            const double x = static_cast<double>(a.x) - b.x;
+            const double y = static_cast<double>(a.y) - b.y;
+            const double z = static_cast<double>(a.z) - b.z;
+            return std::sqrt(x * x + y * y + z * z);
+        };
+        double total = 0.0, widest = 0.0;
+        for (size_t i = 1; i < inputPoints.size(); ++i) {
+            const double l = segmentLength(inputPoints[i], inputPoints[i - 1]);
+            if (!std::isfinite(l)) return;
             total += l;
             widest = std::max(widest, l);
         }
         if (widest > spacing * 1.5f) {
-            const size_t count = std::min<size_t>(400, static_cast<size_t>(total / spacing) + 2);
-            std::vector<Vec3> p2;
-            std::vector<float> r2;
-            std::vector<CorruptionAttributes> a2;
+            // Resample at most once: the 400-sample budget can leave edges
+            // coarser than the desired style spacing. Recursing with that
+            // capped path would keep requesting the same 400 points forever.
+            // Clamp the floating ratio before integer conversion as well.
+            const double desired = total / spacing;
+            const size_t count = desired >= 398.0 ? 400 : static_cast<size_t>(desired) + 2;
+            resampledPoints.reserve(count);
+            resampledRadii.reserve(count);
+            resampledAttributes.reserve(count);
             size_t seg = 0;
-            float segStart = 0.0f;
+            double segStart = 0.0;
             for (size_t k = 0; k < count; ++k) {
-                float at = total * static_cast<float>(k) / static_cast<float>(count - 1);
-                while (seg + 2 < points.size() && segStart + length(points[seg + 1] - points[seg]) < at) {
-                    segStart += length(points[seg + 1] - points[seg]);
+                const double at = total * static_cast<double>(k) / static_cast<double>(count - 1);
+                while (seg + 2 < inputPoints.size() && segStart + segmentLength(inputPoints[seg + 1], inputPoints[seg]) < at) {
+                    segStart += segmentLength(inputPoints[seg + 1], inputPoints[seg]);
                     ++seg;
                 }
-                float l = length(points[seg + 1] - points[seg]);
-                float t = l > 0.0f ? clamp01((at - segStart) / l) : 0.0f;
-                p2.push_back(lerp(points[seg], points[seg + 1], t));
+                const double l = segmentLength(inputPoints[seg + 1], inputPoints[seg]);
+                const float t = l > 0.0 ? clamp01(static_cast<float>((at - segStart) / l)) : 0.0f;
+                resampledPoints.push_back(lerp(inputPoints[seg], inputPoints[seg + 1], t));
                 // A sharp tip stays sharp: only the last sample keeps radius 0.
-                r2.push_back(k + 1 == count ? radii.back() : lerpf(radii[seg], radii[seg + 1], t));
-                a2.push_back(lerpAttributes(attributes[seg], attributes[seg + 1], t));
+                resampledRadii.push_back(k + 1 == count ? inputRadii.back() : lerpf(inputRadii[seg], inputRadii[seg + 1], t));
+                resampledAttributes.push_back(lerpAttributes(inputAttributes[seg], inputAttributes[seg + 1], t));
             }
-            appendTube(mesh, p2, r2, a2, sides, capped, style);
-            return;
         }
     }
+    const auto& points = resampledPoints.empty() ? inputPoints : resampledPoints;
+    const auto& radii = resampledRadii.empty() ? inputRadii : resampledRadii;
+    const auto& attributes = resampledAttributes.empty() ? inputAttributes : resampledAttributes;
     const size_t n = points.size();
     const float pi = 3.14159265358979f;
 

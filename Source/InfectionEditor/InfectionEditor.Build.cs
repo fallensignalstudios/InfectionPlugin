@@ -18,6 +18,8 @@ public class InfectionEditor : ModuleRules
 			"MaterialEditor",
 			"MeshDescription",
 			"PropertyEditor",
+			"RHI",
+			"RenderCore",
 			"SkeletalMeshDescription",
 			"SkeletalMeshUtilitiesCommon",
 			"Slate",

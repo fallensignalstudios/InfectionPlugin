@@ -417,6 +417,43 @@ TEST(preview_renders_the_glow) {
     removeFile(path);
 }
 
+TEST(preview_renders_the_interpolated_flesh_channel) {
+    // Keep all geometry and other corruption data identical, so changing the
+    // soft-tissue mask alone must change the rendered pixels. A gradient also
+    // exercises interpolation inside triangles rather than just their corners.
+    Mesh hard = sphere(0.2f, 0.04f);
+    hard.attributes.resize(hard.vertexCount());
+    for (auto& a : hard.attributes) a.infection = 1.0f;
+    Mesh soft = hard;
+    for (auto& a : soft.attributes) a.flesh = 1.0f;
+    Mesh gradient = hard;
+    for (size_t i = 0; i < gradient.vertexCount(); ++i)
+        gradient.attributes[i].flesh = clamp01(gradient.positions[i].x / 0.4f + 0.5f);
+    PreviewOptions options;
+    options.width = 96;
+    options.height = 96;
+    options.supersample = 1;
+    options.yaws = {0.0f};
+    const Image hardImage = renderPreview(hard, options);
+    const Image softImage = renderPreview(soft, options);
+    const Image gradientImage = renderPreview(gradient, options);
+    CHECK(hardImage.width == 96 && hardImage.height == 96);
+    CHECK(hardImage.rgb.size() == softImage.rgb.size() && hardImage.rgb.size() == gradientImage.rgb.size());
+    size_t softPixels = 0, gradientPixels = 0;
+    for (size_t i = 0; i < hardImage.rgb.size(); i += 3) {
+        bool softDiffers = false, gradientDiffers = false;
+        for (size_t c = 0; c < 3; ++c) {
+            softDiffers = softDiffers || hardImage.rgb[i + c] != softImage.rgb[i + c];
+            gradientDiffers = gradientDiffers || hardImage.rgb[i + c] != gradientImage.rgb[i + c];
+        }
+        softPixels += softDiffers;
+        gradientPixels += gradientDiffers;
+    }
+    CHECK(softPixels > 100);
+    CHECK(gradientPixels > 100);
+    CHECK(gradientImage.rgb != softImage.rgb);
+}
+
 // Signed volume; positive when a closed mesh's faces point outward.
 double signedVolume(const Mesh& m) {
     double v = 0;
@@ -513,6 +550,35 @@ TEST(styled_tubes_stay_closed_and_vary_their_radius) {
     bool unit = true;
     for (const Vec3& n : styled.normals) unit = unit && std::fabs(length(n) - 1.0f) < 1e-3f;
     CHECK(unit);
+}
+
+TEST(styled_tubes_resample_once_when_the_detail_budget_is_exhausted) {
+    // Ten metres of vein at one-centimetre knots needs far more than 400
+    // samples. The capped path remains too coarse for the requested knots,
+    // so recursively resampling it never terminates.
+    const std::vector<Vec3> points = {{0, 0, 0}, {0, 10, 0}};
+    const std::vector<float> radii = {0.02f, 0.02f};
+    std::vector<CorruptionAttributes> attributes(points.size());
+    attributes[0].infection = 1.0f;
+    attributes[1].infection = 0.5f;
+    TubeStyle style;
+    style.lumps = 0.2f;
+    style.lumpSize = 0.01f;
+    Mesh tube;
+    appendTube(tube, points, radii, attributes, 8, true, style);
+    CHECK(tube.vertexCount() == 400 * 8 + 2);
+    CHECK(tube.normals.size() == tube.vertexCount() && tube.attributes.size() == tube.vertexCount());
+    CHECK(brokenEdges(tube) == 0 && signedVolume(tube) > 0.0);
+    bool finite = true, carriesAttributes = true;
+    for (size_t i = 0; i < tube.vertexCount(); ++i) {
+        const Vec3& p = tube.positions[i];
+        const Vec3& n = tube.normals[i];
+        finite = finite && std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z) &&
+                 std::isfinite(n.x) && std::isfinite(n.y) && std::isfinite(n.z);
+        // Attributes are interpolated along the tube (so tone gradients stay smooth).
+        carriesAttributes = carriesAttributes && tube.attributes[i].infection >= 0.5f && tube.attributes[i].infection <= 1.0f;
+    }
+    CHECK(finite && carriesAttributes);
 }
 
 TEST(ellipsoids_are_closed_with_the_right_volume) {

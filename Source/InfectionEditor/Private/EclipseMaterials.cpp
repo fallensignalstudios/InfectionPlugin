@@ -242,7 +242,7 @@ namespace
 		UMaterialExpression* Source = UMaterialEditingLibrary::CreateMaterialExpression(M, Attribute, -1500, Y);
 		auto* Interpolator = Cast<UMaterialExpressionVertexInterpolator>(
 			UMaterialEditingLibrary::CreateMaterialExpression(M, UMaterialExpressionVertexInterpolator::StaticClass(), -1200, Y));
-		Interpolator->VSOutput.Expression = Source;
+		Interpolator->Input.Expression = Source;
 		return Interpolator;
 	}
 
@@ -261,7 +261,7 @@ namespace
 		auto* T = Cast<UMaterialExpressionTextureObject>(
 			UMaterialEditingLibrary::CreateMaterialExpression(M, UMaterialExpressionTextureObject::StaticClass(), -1500, Y));
 		T->Texture = Texture;
-		T->SamplerType = UMaterialExpressionTextureBase::GetSamplerTypeForTexture(Texture);
+		T->AutoSetSampleType();
 		return T;
 	}
 

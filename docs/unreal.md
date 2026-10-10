@@ -232,7 +232,7 @@ Editor, Game Development and Game Shipping builds have passed with precompiled
 headers and unity builds disabled (`-NoPCH -NoSharedPCH -DisableUnity`, the
 flags used by `BuildPlugin -StrictIncludes`), with the 35 standalone tests and
 six Unreal automation tests passing, as of the live-spread fixes. The realism
-pass adds standalone tests (47 now) and a materials automation test; its
+pass adds standalone tests (49 now) and a materials automation test; its
 engine side awaits the same build. Run all Unreal tests with
 `Automation RunTests Infection`: they check skeletal corruption-channel bytes,
 skeletal regeneration after host changes, sparse-map queries, and live-spread
