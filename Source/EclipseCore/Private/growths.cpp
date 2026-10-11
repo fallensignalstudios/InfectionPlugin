@@ -912,6 +912,313 @@ void growSacs(Context& c, Rng& rng, GrowthStats& stats) {
     }
 }
 
+// --- Formations -------------------------------------------------------------
+
+// Walks over the surface from vertex `start` in direction `dir` (projected
+// onto the surface at every step) for up to `length`, staying within the
+// corruption. Returns the ground points, their normals and vertices.
+struct SurfaceWalk {
+    std::vector<Vec3> points, normals;
+    std::vector<uint32_t> vertices;
+};
+
+SurfaceWalk walkSurface(const Context& c, uint32_t start, Vec3 dir, float length, float step) {
+    const auto& S = c.surface;
+    SurfaceWalk w;
+    Vec3 p = S.positions[start];
+    uint32_t v = start;
+    for (float walked = 0.0f; walked <= length; walked += step) {
+        const Vec3& n = S.normals[v];
+        dir -= n * dot(dir, n);
+        if (eclipse::length(dir) < 1e-6f) break;
+        dir = normalize(dir);
+        w.points.push_back(p);
+        w.normals.push_back(n);
+        w.vertices.push_back(v);
+        Vec3 ahead = p + dir * step;
+        int32_t next = c.grid.nearest(ahead, step * 3.0f);
+        if (next < 0) break;
+        v = static_cast<uint32_t>(next);
+        p = ahead - S.normals[v] * dot(ahead - S.positions[v], S.normals[v]);
+        if (c.infection(v) < 0.3f) break;
+    }
+    return w;
+}
+
+// Columns of twisted roots rising from upward-facing tissue.
+void growSpires(Context& c, Rng& rng, Mesh& out, GrowthStats& stats) {
+    const auto& S = c.surface;
+    const float k = c.f.scale;
+    const Vec3 up{0, 1, 0};
+    auto sites = poissonThin(S.positions, c.candidates([&](uint32_t v) {
+        return c.infection(v) > 0.85f && S.normals[v].y > 0.75f && c.maturity(v) > 0.25f;
+    }), c.f.spireSpacing * k);
+    for (uint32_t v : sites) {
+        if (rng.uniform() > 0.6f || c.cleared(S.positions[v])) continue;
+        const Vec3 base = S.positions[v];
+        float H = c.f.spireHeight * k * rng.range(0.6f, 1.3f) * (0.6f + 0.4f * c.maturity(v));
+        // No taller than the open air above it.
+        for (float h = 0.1f * H; h <= H; h += 0.05f * H)
+            if (c.inside.inside(base + up * h)) {
+                H = h * 0.85f;
+                break;
+            }
+        if (H < 0.2f * c.f.spireHeight * k) continue;
+        const float Rb = 0.14f * H;
+        const Vec3 axis = normalize(up * 0.85f + S.normals[v] * 0.15f);
+        const Vec3 ax = anyPerpendicular(axis), ay = cross(axis, ax);
+        const Vec3 lean = (ax * rng.range(-1.0f, 1.0f) + ay * rng.range(-1.0f, 1.0f)) * (0.12f * H);
+        const int strands = 5 + static_cast<int>(rng.below(3));
+        const float turns = rng.range(0.5f, 1.1f) * (rng.uniform() < 0.5f ? -1.0f : 1.0f);
+        const int samples = 40;
+        for (int s = 0; s < strands; ++s) {
+            const float a0 = 6.2831853f * static_cast<float>(s) / static_cast<float>(strands) + rng.range(-0.3f, 0.3f);
+            const float rs = Rb * rng.range(0.38f, 0.5f);
+            std::vector<Vec3> pts;
+            std::vector<float> radii;
+            std::vector<CorruptionAttributes> attrs;
+            for (int i = 0; i < samples; ++i) {
+                float t = static_cast<float>(i) / static_cast<float>(samples - 1);
+                // The strands wind together, then splay apart at the crown.
+                float spread = Rb * (1.0f - 0.7f * t) + Rb * 2.2f * smoothstep(0.82f, 1.0f, t);
+                float a = a0 + 6.2831853f * turns * t;
+                Vec3 centre = base + axis * (H * t) + lean * (t * t) - axis * (0.3f * Rb);
+                pts.push_back(centre + (ax * std::cos(a) + ay * std::sin(a)) * spread);
+                radii.push_back(i + 1 == samples ? 0.0f : rs * (1.0f - 0.8f * t));
+                attrs.push_back(c.hornAttr(v, smoothstep(0.7f, 1.0f, t), 0.5f));
+            }
+            appendTube(out, pts, radii, attrs, 8, true, c.style(0.15f, rs * 2.0f, 0.0f, 1.0f, v * 13u + static_cast<uint32_t>(s)));
+            c.perches.emplace_back(pts[samples * 3 / 4], radii[samples * 3 / 4]);
+        }
+        // The glowing core between the strands.
+        std::vector<Vec3> core;
+        std::vector<float> coreRadii;
+        std::vector<CorruptionAttributes> coreAttrs;
+        for (int i = 0; i < 20; ++i) {
+            float t = static_cast<float>(i) / 19.0f * 0.8f;
+            core.push_back(base + axis * (H * t) + lean * (t * t));
+            coreRadii.push_back(i == 19 ? 0.0f : Rb * 0.42f * (1.0f - 0.6f * t));
+            coreAttrs.push_back(c.softAttr(v, 0.7f * (0.4f + 0.6f * std::sin(t * 9.0f) * std::sin(t * 9.0f))));
+        }
+        appendTube(*c.fleshOut, core, coreRadii, coreAttrs, 10, true, c.style(0.2f, Rb, 0.0f, 1.0f, v));
+        c.fuse(base, S.normals[v], Rb * 3.2f, Rb * 0.9f);
+        c.clearings.emplace_back(base, Rb * 2.0f);
+        ++stats.spires;
+    }
+}
+
+// A buried spine with paired ribs arching up over it.
+void growRibcages(Context& c, Rng& rng, Mesh& out, GrowthStats& stats) {
+    const auto& S = c.surface;
+    const float k = c.f.scale;
+    auto sites = poissonThin(S.positions, c.candidates([&](uint32_t v) {
+        // Lying on floors and ledges, like remains.
+        return c.infection(v) > 0.9f && c.maturity(v) > 0.3f && S.normals[v].y > 0.6f;
+    }), c.f.ribcageSpacing * k);
+    for (uint32_t v : sites) {
+        if (rng.uniform() > 0.7f || c.cleared(S.positions[v])) continue;
+        const float L = c.f.ribcageLength * k * rng.range(0.7f, 1.2f);
+        // Lay the spine across the grain, so it runs past the cores rather
+        // than into them.
+        Vec3 dir = cross(S.normals[v], c.grain[v]);
+        SurfaceWalk spine = walkSurface(c, v, dir, L, 0.01f * k);
+        if (spine.points.size() < 12) continue;
+        const size_t n = spine.points.size();
+        const float W = L * rng.range(0.22f, 0.32f);  // half-width of the cage
+        const float Hc = W * rng.range(1.0f, 1.4f);   // height of the arch
+        // The spine: a row of half-buried vertebrae.
+        const size_t ribEvery = std::max<size_t>(2, n / 10);
+        for (size_t i = 0; i < n; i += ribEvery / 2 + 1) {
+            const Vec3& p = spine.points[i];
+            const Vec3& nn = spine.normals[i];
+            Vec3 along = spine.points[std::min(i + 1, n - 1)] - spine.points[i > 0 ? i - 1 : 0];
+            along -= nn * dot(along, nn);
+            if (length(along) < 1e-6f) continue;
+            along = normalize(along);
+            float w = 0.06f * L;
+            const size_t v0 = out.vertexCount(), t0 = out.triangleCount();
+            appendEllipsoid(out, p + nn * (0.15f * w), cross(nn, along), along, nn, Vec3{w * 0.9f, w * 0.55f, w * 0.6f}, 8,
+                            12, [&](const Vec3& u) {
+                                CorruptionAttributes a = c.attr(spine.vertices[i], 0.0f);
+                                a.tone = 0.35f + 0.3f * smoothstep(0.0f, 1.0f, u.z);
+                                return a;
+                            });
+            roughen(out, v0, t0, 0.08f * w * c.f.roughness, 0.4f * w, spine.vertices[i]);
+            c.fuse(p, nn, w * 2.2f, w * 0.5f);
+        }
+        // Ribs, longest in the middle of the cage.
+        for (size_t i = ribEvery; i + ribEvery / 2 < n; i += ribEvery) {
+            const Vec3& p = spine.points[i];
+            const Vec3& nn = spine.normals[i];
+            Vec3 along = spine.points[std::min(i + 1, n - 1)] - spine.points[i - 1];
+            along -= nn * dot(along, nn);
+            if (length(along) < 1e-6f) continue;
+            along = normalize(along);
+            const Vec3 side = normalize(cross(nn, along));
+            const float x = static_cast<float>(i) / static_cast<float>(n - 1);
+            const float size = 0.45f + 0.55f * std::sin(3.14159265f * x);
+            for (float sign : {-1.0f, 1.0f}) {
+                const Vec3 s = side * sign;
+                const float w = W * size * rng.range(0.85f, 1.1f), h = Hc * size * rng.range(0.85f, 1.1f);
+                // Up out of the spine, out wide, then curling back in overhead.
+                const Vec3 a = p + s * (0.08f * w) - nn * (0.02f * w);
+                const Vec3 bend = p + s * (1.25f * w) + nn * (0.75f * h) - along * (0.1f * w);
+                const Vec3 d = p + s * (0.4f * w) + nn * (1.1f * h) - along * (0.25f * w);
+                auto pts = sampleQuadratic(a, bend, d, 26);
+                if (!clearOfHost(c, pts)) continue;
+                const float r0 = 0.07f * w + 0.004f * k;
+                std::vector<float> radii;
+                std::vector<CorruptionAttributes> attrs;
+                for (size_t j = 0; j < pts.size(); ++j) {
+                    float t = static_cast<float>(j) / static_cast<float>(pts.size() - 1);
+                    radii.push_back(j + 1 == pts.size() ? 0.0f : r0 * (1.0f - 0.75f * t) * (1.0f + 0.4f * std::pow(1.0f - t, 6.0f)));
+                    CorruptionAttributes at = c.attr(spine.vertices[i], 0.0f);
+                    at.tone = 0.15f + 0.6f * t;  // bone, palest at the tips
+                    attrs.push_back(at);
+                }
+                appendTube(out, pts, radii, attrs, 8, true,
+                           c.style(0.05f, r0 * 2.0f, 0.05f, w * 0.12f, v * 31u + static_cast<uint32_t>(i) * 2u + (sign > 0 ? 1u : 0u)));
+                c.perches.emplace_back(pts[pts.size() * 2 / 3], radii[pts.size() * 2 / 3]);
+                c.fuse(a, nn, r0 * 3.0f, r0 * 0.8f);
+            }
+        }
+        ++stats.ribcages;
+    }
+}
+
+// Large egg cocoons with a shape glowing faintly inside, roots wound round.
+void growPods(Context& c, Rng& rng, Mesh& out, GrowthStats& stats) {
+    const auto& S = c.surface;
+    const float k = c.f.scale;
+    const Vec3 up{0, 1, 0};
+    auto sites = poissonThin(S.positions, c.candidates([&](uint32_t v) {
+        return c.infection(v) > 0.8f && S.normals[v].y > -0.2f && c.maturity(v) > 0.2f;
+    }), c.f.podSpacing * k);
+    for (uint32_t v : sites) {
+        if (rng.uniform() > 0.5f || c.cleared(S.positions[v])) continue;
+        const int count = 1 + static_cast<int>(rng.below(3));
+        bool any = false;
+        for (int i = 0; i < count; ++i) {
+            const float L = c.f.podSize * k * rng.range(0.7f, 1.3f);
+            const float R = L * rng.range(0.26f, 0.34f);  // egg-shaped, about twice as long as wide
+            Vec3 at = S.positions[v];
+            if (i > 0) {
+                const Vec3 t1 = anyPerpendicular(S.normals[v]), t2 = cross(S.normals[v], t1);
+                const float a = rng.range(0.0f, 6.2831853f);
+                const Vec3 offset = (t1 * std::cos(a) + t2 * std::sin(a)) * (1.6f * R);
+                int32_t w = c.grid.nearest(at + offset, 2.0f * R);
+                if (w < 0) continue;
+                at = S.positions[static_cast<uint32_t>(w)];
+            }
+            int32_t near = c.grid.nearest(at, 0.05f * k);
+            if (near < 0) continue;
+            const uint32_t u = static_cast<uint32_t>(near);
+            const Vec3& n = S.normals[u];
+            // Standing up from floors, leaning out from walls.
+            const Vec3 axis = normalize(n * 0.6f + up * 0.4f + anyPerpendicular(n) * rng.range(-0.2f, 0.2f));
+            const Vec3 ax = anyPerpendicular(axis), ay = cross(axis, ax);
+            const Vec3 centre = at + axis * (L * 0.45f);
+            if (c.inside.inside(centre + axis * L * 0.5f)) continue;
+            const size_t v0 = c.fleshOut->vertexCount(), t0 = c.fleshOut->triangleCount();
+            const float glow = rng.range(0.15f, 0.4f);
+            appendEllipsoid(*c.fleshOut, centre, ax, ay, axis, Vec3{R, R * rng.range(0.85f, 1.0f), L * 0.5f}, 18, 24,
+                            [&](const Vec3& unit) {
+                                // Something curled inside, lit from within at the middle.
+                                return c.softAttr(u, glow * (1.0f - smoothstep(0.1f, 0.8f, std::fabs(unit.z))));
+                            });
+            roughen(*c.fleshOut, v0, t0, 0.06f * R * c.f.roughness, 0.5f * R, u);
+            // Roots wound around it from the base most of the way up.
+            const int roots = 2 + static_cast<int>(rng.below(3));
+            for (int r = 0; r < roots; ++r) {
+                float a0 = rng.range(0.0f, 6.2831853f), turns = rng.range(0.4f, 0.9f);
+                std::vector<Vec3> pts;
+                std::vector<float> radii;
+                std::vector<CorruptionAttributes> attrs;
+                const float rr = R * rng.range(0.08f, 0.13f);
+                for (int j = 0; j < 24; ++j) {
+                    float t = static_cast<float>(j) / 23.0f;
+                    float z = -0.95f + 1.6f * t;
+                    float ring = std::sqrt(std::max(0.0f, 1.0f - z * z));
+                    float a = a0 + 6.2831853f * turns * t;
+                    pts.push_back(centre + axis * (z * L * 0.5f) + (ax * std::cos(a) + ay * std::sin(a)) * (R * ring + rr * 0.6f));
+                    radii.push_back(j == 23 ? 0.0f : rr * (1.0f - 0.6f * t));
+                    attrs.push_back(c.attr(u, 0.0f));
+                }
+                appendTube(out, pts, radii, attrs, 6, true, c.style(0.2f, rr * 3.0f, 0.0f, 1.0f, u * 7u + static_cast<uint32_t>(r)));
+            }
+            c.fuse(at, n, R * 1.9f, R * 0.5f);
+            c.clearings.emplace_back(centre, R * 1.1f);
+            any = true;
+        }
+        if (any) ++stats.pods;
+    }
+}
+
+// Stacked bracket-fungus plates on walls, with glowing gills beneath.
+void growShelves(Context& c, Rng& rng, Mesh& out, GrowthStats& stats) {
+    const auto& S = c.surface;
+    const float k = c.f.scale;
+    const Vec3 up{0, 1, 0};
+    auto sites = poissonThin(S.positions, c.candidates([&](uint32_t v) {
+        return c.infection(v) > 0.7f && std::fabs(S.normals[v].y) < 0.35f;
+    }), c.f.shelfSpacing * k);
+    for (uint32_t v : sites) {
+        if (rng.uniform() > 0.5f || c.cleared(S.positions[v])) continue;
+        const int count = 3 + static_cast<int>(rng.below(4));
+        Vec3 at = S.positions[v];
+        float size = c.f.shelfSize * k * rng.range(0.8f, 1.3f);
+        int grown = 0;
+        for (int i = 0; i < count; ++i) {
+            int32_t near = c.grid.nearest(at, 0.05f * k);
+            if (near < 0) break;
+            const uint32_t u = static_cast<uint32_t>(near);
+            const Vec3 n = S.normals[u];
+            if (std::fabs(n.y) > 0.5f) break;
+            Vec3 across = cross(up, n);
+            if (length(across) < 1e-4f) break;
+            across = normalize(across);
+            const Vec3 vertical = normalize(cross(across, n));
+            // Tilted up a little, half buried in the wall: a half-disc,
+            // thick where it grows from the wall, thin at its wavy rim.
+            const Vec3 face = normalize(n + vertical * 0.25f);
+            const Vec3 centre = S.positions[u] + n * (size * 0.05f);
+            const size_t v0 = out.vertexCount(), t0 = out.triangleCount();
+            appendEllipsoid(out, centre, across, face, normalize(cross(across, face)), Vec3{size, size * 0.8f, size * 0.2f}, 10,
+                            24, [&](const Vec3& unit) {
+                                CorruptionAttributes a = c.attr(u, 0.0f);
+                                if (unit.z < -0.2f) {
+                                    // Gills radiating from the wall, faintly lit.
+                                    float angle = std::atan2(unit.y, unit.x);
+                                    a.glow = 0.2f * smoothstep(0.6f, 0.95f, 0.5f + 0.5f * std::sin(angle * 28.0f)) *
+                                             smoothstep(-0.2f, -0.6f, unit.z);
+                                } else {
+                                    a.tone = 0.25f * smoothstep(0.5f, 1.0f, std::sqrt(unit.x * unit.x + unit.y * unit.y));
+                                }
+                                return a;
+                            });
+            // Thin toward the rim, with a wavy edge; the back pressed flat
+            // just inside the wall rather than through it.
+            for (size_t i = v0; i < out.vertexCount(); ++i) {
+                float behind = dot(out.positions[i] - S.positions[u], n) + 0.02f * size;
+                if (behind < 0.0f) out.positions[i] -= n * behind;
+                Vec3 local = out.positions[i] - centre;
+                float rim = clamp01(dot(local, face) / (size * 0.8f));
+                Vec3 thick = normalize(cross(across, face));
+                out.positions[i] -= thick * (dot(local, thick) * 0.6f * rim);
+            }
+            roughen(out, v0, t0, 0.09f * size * c.f.roughness, 0.3f * size, u);
+            c.fuse(S.positions[u], n, size * 1.2f, size * 0.25f);
+            c.perches.emplace_back(centre + face * (size * 0.6f), size * 0.1f);
+            ++grown;
+            // The next one above and to the side, smaller.
+            // The next one overlapping beside and above it.
+            at = S.positions[u] + up * (size * rng.range(0.3f, 0.6f)) + across * (size * rng.range(0.7f, 1.1f) * (rng.uniform() < 0.5f ? -1.0f : 1.0f));
+            size *= rng.range(0.75f, 1.05f);
+        }
+        if (grown > 0) ++stats.shelves;
+    }
+}
+
 // Swells the surface up around each growth's base, so that growths rise out
 // of the tissue instead of sitting on it. Overlapping swellings merge by
 // taking the higher, not the sum, so clusters do not tower.
@@ -997,9 +1304,15 @@ Growth grow(const Mesh& host, const std::vector<Vec3>& seeds, const GrowthParams
     // it leaves the others exactly where they were.
     Rng spikeRng(params.seed, 11), noduleRng(params.seed, 12), strandRng(params.seed, 13), bridgeRng(params.seed, 14);
     Rng tendrilRng(params.seed, 15), heartRng(params.seed, 16), sacRng(params.seed, 17), slimeRng(params.seed, 18);
+    Rng spireRng(params.seed, 19), ribRng(params.seed, 20), podRng(params.seed, 21), shelfRng(params.seed, 22);
     if (features.hearts)
         for (uint32_t s : heartSeeds(c))
             c.clearings.emplace_back(S.positions[s], heartRadius(c, s) * (heartIsMaw(c) ? 1.5f : 0.9f));
+    // Set pieces first, so the smaller growths keep out of their space.
+    if (features.spires) growSpires(c, spireRng, g.growths, g.stats);
+    if (features.pods) growPods(c, podRng, g.growths, g.stats);
+    if (features.ribcages) growRibcages(c, ribRng, g.growths, g.stats);
+    if (features.shelves) growShelves(c, shelfRng, g.growths, g.stats);
     if (features.veinTubes) growVeinTubes(c, g.veins, g.growths, g.stats);
     if (features.tendrils) growTendrils(c, tendrilRng, g.growths, g.stats);
     if (features.vertebrae) growVertebrae(c, g.veins, g.growths, g.stats);

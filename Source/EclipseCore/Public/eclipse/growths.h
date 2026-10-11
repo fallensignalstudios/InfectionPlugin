@@ -87,12 +87,36 @@ struct FeatureParams {
     float bridgeChance = 0.7f;
     float membraneChance = 0.45f;       // share of bridges that grow a torn membrane
     float membraneHoles = 0.35f;        // share of membrane torn away
+
+    // Formations: large set pieces, off by default (the presets in
+    // eclipse/presets.h turn them on). Sizes are at scale 1; rooms want
+    // scale 2 or more.
+    // Spires: columns of twisted roots rising from floors and ledges, their
+    // tips splaying into claws, a glowing core showing between the strands.
+    bool spires = false;
+    float spireSpacing = 0.6f;
+    float spireHeight = 0.7f;
+    // Ribcages: a buried spine with paired ribs arching up over it, pale
+    // toward their tips, like the remains of something the growth consumed.
+    bool ribcages = false;
+    float ribcageSpacing = 0.8f;
+    float ribcageLength = 0.5f;
+    // Pods: large egg-shaped cocoons, translucent, with a shape glowing
+    // faintly inside and roots wound around them.
+    bool pods = false;
+    float podSpacing = 0.35f;
+    float podSize = 0.14f;
+    // Shelves: stacked bracket-fungus plates on walls, glowing gills beneath.
+    bool shelves = false;
+    float shelfSpacing = 0.45f;
+    float shelfSize = 0.11f;
 };
 
 struct GrowthStats {
     size_t veinTubes = 0, spikes = 0, nodules = 0, strands = 0, bridges = 0, membranes = 0;
     size_t tendrils = 0, hearts = 0, vertebrae = 0;
     size_t maws = 0, sacs = 0, barbs = 0, rootlets = 0, slime = 0;
+    size_t spires = 0, ribcages = 0, pods = 0, shelves = 0;
 };
 
 // Everything one growth produced. `surface` is the host, displaced and

@@ -17,6 +17,26 @@ enum class EEclipseOutputMode : uint8
 	Replace,
 };
 
+// Named looks (see eclipse/presets.h); same order as eclipse::Preset.
+UENUM()
+enum class EEclipsePreset : uint8
+{
+	// Carapace, roots, horns, hearts and maws.
+	Eclipse,
+	// Early infestation: veins and roots feeling ahead, a long halo, little else.
+	Creep,
+	// A bed of scythe horns and barbs.
+	Thornfield,
+	// Thick knotted roots over everything, vertebrae along the trunks.
+	Rootmass,
+	// Sacs, pods, eyes, membranes, shelves and slime: a nest.
+	Hive,
+	// Ribcages and bone, hanging strands, bruised flesh.
+	Carcass,
+	// Set pieces for a room: spires, ribcages, shelves, great maws.
+	Cathedral,
+};
+
 // Every setting of the Eclipse Growth panel, remembered per user and project.
 // Lengths are in centimetres, like the rest of the editor; the generator
 // works in metres and converts.
@@ -30,6 +50,24 @@ public:
 
 	// The output folder as a long package path, e.g. /Game/Eclipse.
 	FString OutputPackagePath() const;
+
+	// Rewrites every look setting below from Preset (framing settings such
+	// as Seed, Coverage, Feature Scale and Plate Size are kept). Called when
+	// Preset changes in the panel.
+	UFUNCTION(BlueprintCallable, Category = "Eclipse")
+	void ApplyPreset();
+
+#if WITH_EDITOR
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& Event) override;
+#endif
+
+	// --- Preset -------------------------------------------------------------
+
+	// A starting look. Choosing one rewrites the settings below to match;
+	// tweak them from there. Values the panel does not show (spacings,
+	// cluster sizes) also come from it.
+	UPROPERTY(EditAnywhere, Config, Category = "Preset")
+	EEclipsePreset Preset = EEclipsePreset::Eclipse;
 
 	// --- Spread -------------------------------------------------------------
 
@@ -185,6 +223,37 @@ public:
 
 	UPROPERTY(EditAnywhere, Config, Category = "Growths", meta = (ClampMin = "0", ClampMax = "1", EditCondition = "bGrowths && bSlime"))
 	float SlimeChance = 0.5f;
+
+	// --- Formations ---------------------------------------------------------
+
+	// Columns of twisted roots rising from floors and ledges, clawed crowns,
+	// a glowing core between the strands.
+	UPROPERTY(EditAnywhere, Config, Category = "Formations", meta = (EditCondition = "bGrowths"))
+	bool bSpires = false;
+
+	UPROPERTY(EditAnywhere, Config, Category = "Formations", meta = (ClampMin = "10", ClampMax = "1000", Units = "cm", EditCondition = "bGrowths && bSpires"))
+	float SpireHeight = 70.0f;
+
+	// A buried spine with ribs arching over it, lying on floors.
+	UPROPERTY(EditAnywhere, Config, Category = "Formations", meta = (EditCondition = "bGrowths"))
+	bool bRibcages = false;
+
+	UPROPERTY(EditAnywhere, Config, Category = "Formations", meta = (ClampMin = "10", ClampMax = "1000", Units = "cm", EditCondition = "bGrowths && bRibcages"))
+	float RibcageLength = 50.0f;
+
+	// Egg cocoons with a shape glowing inside, roots wound around them.
+	UPROPERTY(EditAnywhere, Config, Category = "Formations", meta = (EditCondition = "bGrowths"))
+	bool bPods = false;
+
+	UPROPERTY(EditAnywhere, Config, Category = "Formations", meta = (ClampMin = "2", ClampMax = "300", Units = "cm", EditCondition = "bGrowths && bPods"))
+	float PodSize = 14.0f;
+
+	// Stacked bracket-fungus plates on walls, with glowing gills beneath.
+	UPROPERTY(EditAnywhere, Config, Category = "Formations", meta = (EditCondition = "bGrowths"))
+	bool bShelves = false;
+
+	UPROPERTY(EditAnywhere, Config, Category = "Formations", meta = (ClampMin = "2", ClampMax = "200", Units = "cm", EditCondition = "bGrowths && bShelves"))
+	float ShelfSize = 11.0f;
 
 	// --- Mesh ---------------------------------------------------------------
 

@@ -17,6 +17,7 @@
 #include "eclipse/export.h"
 #include "eclipse/growths.h"
 #include "eclipse/hosts.h"
+#include "eclipse/presets.h"
 #include "eclipse/preview.h"
 
 using namespace eclipse;
@@ -38,6 +39,9 @@ void usage() {
         "  --obj                  also write OBJ files\n"
         "  --feature-scale F      size of spikes, nodules, strands and membranes (default 1, corridor 2)\n"
         "  --no-growths           corrupt the surface only\n"
+        "  --preset NAME          a look: eclipse, creep, thornfield, rootmass, hive, carcass, cathedral\n"
+        "                         (resets the look; options after it still apply)\n"
+        "  --spires --ribcages --pods --shelves   add formations (large set pieces)\n"
         "  --fusion F             how much tissue swells around growths (default 1, 0 off)\n"
         "  --roughness F          how knotted and lumpy growths are (default 1, 0 smooth)\n"
         "  --overlay              export only the corrupted shell, to lay over the untouched host\n"
@@ -162,6 +166,15 @@ int main(int argc, char** argv) {
         else if (a == "--no-preview") preview = false;
         else if (a == "--detail-maps") detailMaps = true;
         else if (a == "--no-growths") features.enabled = false;
+        else if (a == "--preset") {
+            Preset preset;
+            if (!presetFromName(next(), preset)) { usage(); return 2; }
+            applyPreset(preset, params, features);
+        }
+        else if (a == "--spires") features.spires = true;
+        else if (a == "--ribcages") features.ribcages = true;
+        else if (a == "--pods") features.pods = true;
+        else if (a == "--shelves") features.shelves = true;
         else if (a == "--fusion") features.fusion = std::strtof(next().c_str(), nullptr);
         else if (a == "--roughness") features.roughness = std::strtof(next().c_str(), nullptr);
         else if (a == "--overlay") overlay = true;
@@ -266,6 +279,9 @@ int main(int argc, char** argv) {
                     g.stats.tendrils, g.stats.rootlets, g.stats.veinTubes, g.stats.spikes, g.stats.barbs, g.stats.hearts, g.stats.maws,
                     g.stats.vertebrae, g.stats.nodules, g.stats.sacs, g.stats.slime, g.stats.strands, g.stats.bridges,
                     g.stats.membranes, g.growths.triangleCount(), g.flesh.triangleCount());
+        if (g.stats.spires + g.stats.ribcages + g.stats.pods + g.stats.shelves > 0)
+            std::printf("    formations: %zu spires, %zu ribcages, %zu pod clusters, %zu shelf clusters\n", g.stats.spires,
+                        g.stats.ribcages, g.stats.pods, g.stats.shelves);
         if (preview) {
             if (!focus.empty()) grown = cropToSphere(grown, {focus[0], focus[1], focus[2]}, focus[3]);
             PreviewOptions opts;
