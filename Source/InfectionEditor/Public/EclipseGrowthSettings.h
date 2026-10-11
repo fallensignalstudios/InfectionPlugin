@@ -257,6 +257,16 @@ public:
 
 	// --- Mesh ---------------------------------------------------------------
 
+	// Grow every selected static mesh as one surface, so the corruption
+	// crosses from floor to walls to props where they touch, from seeds near
+	// any of them. Off: each grows on its own. Characters always grow alone.
+	UPROPERTY(EditAnywhere, Config, Category = "Mesh")
+	bool bGrowAsOne = true;
+
+	// Meshes closer than this count as touching.
+	UPROPERTY(EditAnywhere, Config, Category = "Mesh", meta = (ClampMin = "0", ClampMax = "50", Units = "cm", EditCondition = "bGrowAsOne"))
+	float ContactGap = 2.0f;
+
 	// The host is subdivided until no edge is longer than this. Corruption
 	// detail lives on vertices, so smaller is finer but heavier.
 	UPROPERTY(EditAnywhere, Config, Category = "Mesh", meta = (ClampMin = "0.2", ClampMax = "20", Units = "cm"))

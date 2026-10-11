@@ -24,6 +24,7 @@
 #include "eclipse/hosts.h"
 #include "eclipse/presets.h"
 #include "eclipse/preview.h"
+#include "eclipse/scene.h"
 #include "eclipse/random.h"
 #include "eclipse/sdf.h"
 #include "eclipse/skin.h"
@@ -855,6 +856,99 @@ TEST(presets_name_and_shape_the_look) {
     CHECK(f.spikeSpacing == FeatureParams{}.spikeSpacing && !f.spires);
     applyPreset(Preset::Cathedral, p, f);
     CHECK(f.spires && f.ribcages && f.shelves);
+}
+
+TEST(mask_volumes_weigh_inside_and_fade_outside) {
+    MaskVolume box;
+    box.centre = {1, 0, 0};
+    box.halfExtents = {0.5f, 0.2f, 0.2f};
+    box.falloff = 0.1f;
+    box.strength = 0.8f;
+    CHECK(std::fabs(box.weightAt({1.4f, 0.1f, 0.0f}) - 0.8f) < 1e-6f);  // inside
+    float edge = box.weightAt({1.55f, 0.0f, 0.0f});                     // half-way through the falloff
+    CHECK(edge > 0.1f && edge < 0.7f);
+    CHECK(box.weightAt({1.7f, 0.0f, 0.0f}) == 0.0f);
+    // A box turned 90 degrees about y: long along z now.
+    box.axes[0] = {0, 0, 1};
+    box.axes[2] = {1, 0, 0};
+    CHECK(box.weightAt({1.0f, 0.0f, 0.45f}) > 0.79f && box.weightAt({1.45f, 0.0f, 0.0f}) == 0.0f);
+    MaskVolume ball;
+    ball.shape = MaskVolume::Shape::Sphere;
+    ball.halfExtents = {0.3f, 0, 0};
+    CHECK(ball.weightAt({0.2f, 0.2f, 0.0f}) == 1.0f && ball.weightAt({0.3f, 0.3f, 0.0f}) == 0.0f);
+}
+
+TEST(a_scene_spreads_across_touching_meshes) {
+    // A floor and, standing on it, a separate wall: no shared vertices.
+    Mesh floor = testPlane(false), wall = testPlane(true);
+    GrowthParams p;
+    p.coverage = 0.5f;
+    FeatureParams none;
+    none.enabled = false;
+    const std::vector<Vec3> seeds = {{0.0f, 0.0f, 0.25f}};
+    SceneGrowth joined = growScene({&floor, &wall}, seeds, p, none, 0.01f);
+    SceneGrowth apart = growScene({&floor, &wall}, seeds, p, none, 0.0f);
+    auto infected = [](const SceneGrowth& s, uint32_t piece) {
+        size_t count = 0;
+        for (size_t v = 0; v < s.owner.size(); ++v)
+            if (s.owner[v] == piece && s.growth.surface.attributes[v].infection > 0.5f) ++count;
+        return count;
+    };
+    CHECK(joined.owner.size() == floor.vertexCount() + wall.vertexCount());
+    CHECK(infected(apart, 1) == 0);    // without contact the wall stays clean
+    CHECK(infected(joined, 1) > 500);  // with it, the corruption climbs the wall
+    // Split back, the pieces hold every triangle between them.
+    Mesh a = subMesh(joined.growth.surface, joined.owner, 0), b = subMesh(joined.growth.surface, joined.owner, 1);
+    CHECK(a.triangleCount() == floor.triangleCount() && b.triangleCount() == wall.triangleCount());
+    CHECK(a.attributes.size() == a.vertexCount() && b.normals.size() == b.vertexCount());
+}
+
+TEST(masks_block_bare_and_draw_the_corruption) {
+    Mesh floor = testPlane(false);
+    GrowthParams p;
+    p.coverage = 0.6f;
+    const std::vector<Vec3> seeds = {{0.0f, 0.0f, 0.0f}};
+    MaskVolume walkway;  // a strip across the floor, beside the seed
+    walkway.centre = {0.3f, 0.0f, 0.0f};
+    walkway.halfExtents = {0.1f, 0.2f, 0.9f};
+    SceneGrowth blocked = growScene({&floor}, seeds, p, FeatureParams{}, 0.0f, {walkway});
+    bool clean = true;
+    for (size_t v = 0; v < floor.vertexCount(); ++v)
+        if (walkway.weightAt(floor.positions[v]) >= 1.0f)
+            clean = clean && blocked.growth.surface.attributes[v].infection == 0.0f;
+    CHECK(clean);
+
+    MaskVolume bare = walkway;
+    bare.mode = MaskVolume::Mode::Bare;
+    bare.centre = {0.0f, 0.0f, 0.0f};
+    bare.halfExtents = {0.35f, 0.2f, 0.35f};
+    SceneGrowth smooth = growScene({&floor}, seeds, p, FeatureParams{}, 0.0f, {bare});
+    size_t corrupted = 0;
+    for (size_t v = 0; v < floor.vertexCount(); ++v)
+        if (bare.weightAt(floor.positions[v]) >= 1.0f && smooth.growth.surface.attributes[v].infection > 0.5f) ++corrupted;
+    CHECK(corrupted > 100);  // the tissue still turns...
+    MaskVolume core = bare;  // ...but nothing grows from inside it
+    core.halfExtents = {0.25f, 0.2f, 0.25f};
+    size_t inside = 0;
+    for (const Mesh* m : {&smooth.growth.growths, &smooth.growth.flesh})
+        for (const Vec3& q : m->positions)
+            if (q.y < 0.02f && core.weightAt(q) >= 1.0f) ++inside;
+    CHECK(inside == 0);
+
+    MaskVolume lure = walkway;
+    lure.mode = MaskVolume::Mode::Dense;
+    lure.centre = {-0.5f, 0.0f, 0.0f};
+    FeatureParams none;
+    none.enabled = false;
+    SceneGrowth drawn = growScene({&floor}, seeds, p, none, 0.0f, {lure});
+    SceneGrowth plain = growScene({&floor}, seeds, p, none, 0.0f, {});
+    double before = 0.0, after = 0.0;
+    for (size_t v = 0; v < floor.vertexCount(); ++v)
+        if (lure.weightAt(floor.positions[v]) >= 1.0f) {
+            before += plain.growth.surface.attributes[v].arrival;
+            after += drawn.growth.surface.attributes[v].arrival;
+        }
+    CHECK(after < before);  // reached sooner, so older there
 }
 
 TEST(soft_tissue_is_its_own_mesh) {

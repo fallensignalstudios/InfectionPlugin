@@ -69,6 +69,24 @@ void SEclipseGrowthPanel::Construct(const FArguments& InArgs)
 		.AutoHeight()
 		.Padding(6.0f, 0.0f, 6.0f, 6.0f)
 		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(2.0f)
+			[
+				Button(LOCTEXT("Previous", "Previous Variation"),
+					LOCTEXT("PreviousTip", "Step the Seed back by one and grow the selection again."),
+					FOnClicked::CreateSP(this, &SEclipseGrowthPanel::OnVariation, -1))
+			]
+			+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(2.0f)
+			[
+				Button(LOCTEXT("Next", "Next Variation"),
+					LOCTEXT("NextTip", "Step the Seed on by one and grow the selection again: the same settings, a different growth."),
+					FOnClicked::CreateSP(this, &SEclipseGrowthPanel::OnVariation, 1))
+			]
+		]
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(6.0f, 0.0f, 6.0f, 6.0f)
+		[
 			SNew(SBorder)
 			.Padding(6.0f)
 			[
@@ -88,6 +106,17 @@ void SEclipseGrowthPanel::Construct(const FArguments& InArgs)
 FReply SEclipseGrowthPanel::OnGrow()
 {
 	Status = EclipseGrowthRunner::GrowOnSelection(*GetDefault<UEclipseGrowthSettings>());
+	return FReply::Handled();
+}
+
+FReply SEclipseGrowthPanel::OnVariation(int32 Step)
+{
+	UEclipseGrowthSettings* Settings = GetMutableDefault<UEclipseGrowthSettings>();
+	Settings->Seed = FMath::Max(0, Settings->Seed + Step);
+	Settings->SaveConfig();
+	Details->ForceRefresh();
+	Status = FText::Format(LOCTEXT("Variation", "Seed {0}: {1}"), FText::AsNumber(Settings->Seed),
+		EclipseGrowthRunner::GrowOnSelection(*Settings));
 	return FReply::Handled();
 }
 

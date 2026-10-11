@@ -17,6 +17,7 @@ public:
 private:
 	FReply OnGrow();
 	FReply OnAddSeed();
+	FReply OnVariation(int32 Step);
 	FReply OnRebuildMaterials();
 
 	TSharedPtr<IDetailsView> Details;

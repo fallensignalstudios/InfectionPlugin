@@ -1,10 +1,13 @@
 #include "EclipseGrowthRunner.h"
 
+#include <algorithm>
+
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "EclipseFollowerComponent.h"
 #include "EclipseInfectionMap.h"
+#include "EclipseMask.h"
 #include "EclipseSpreadComponent.h"
 #include "EclipseGrowthSettings.h"
 #include "EclipseMaterials.h"
@@ -25,6 +28,7 @@
 #include "eclipse/corruption.h"
 #include "eclipse/growths.h"
 #include "eclipse/presets.h"
+#include "eclipse/scene.h"
 #include "eclipse/mesh.h"
 #include "eclipse/skin.h"
 
@@ -186,6 +190,38 @@ namespace
 			Seeds.push_back(EclipseBridge::ToEclipse(Seed->GetActorLocation() - Origin));
 		}
 		return Seeds;
+	}
+
+	// Every enabled Eclipse Mask in the level, in the frame of a growth
+	// whose geometry is relative to Origin.
+	std::vector<eclipse::MaskVolume> MasksIn(UWorld* World, const FVector& Origin)
+	{
+		std::vector<eclipse::MaskVolume> Masks;
+		for (TActorIterator<AEclipseMask> It(World); It; ++It)
+		{
+			if (!It->bEnabled)
+			{
+				continue;
+			}
+			FTransform Frame;
+			FVector HalfExtents;
+			It->GetWorldShape(Frame, HalfExtents);
+			eclipse::MaskVolume Mask;
+			Mask.mode = It->Mode == EEclipseMaskMode::Block ? eclipse::MaskVolume::Mode::Block
+					  : It->Mode == EEclipseMaskMode::Bare ? eclipse::MaskVolume::Mode::Bare
+														   : eclipse::MaskVolume::Mode::Dense;
+			Mask.shape = It->Shape == EEclipseMaskShape::Sphere ? eclipse::MaskVolume::Shape::Sphere : eclipse::MaskVolume::Shape::Box;
+			Mask.centre = EclipseBridge::ToEclipse(Frame.GetLocation() - Origin);
+			Mask.axes[0] = EclipseBridge::DirectionToEclipse(Frame.GetUnitAxis(EAxis::X));
+			Mask.axes[1] = EclipseBridge::DirectionToEclipse(Frame.GetUnitAxis(EAxis::Y));
+			Mask.axes[2] = EclipseBridge::DirectionToEclipse(Frame.GetUnitAxis(EAxis::Z));
+			Mask.halfExtents = {static_cast<float>(HalfExtents.X) * 0.01f, static_cast<float>(HalfExtents.Y) * 0.01f,
+				static_cast<float>(HalfExtents.Z) * 0.01f};
+			Mask.falloff = It->Falloff * 0.01f;
+			Mask.strength = It->Strength;
+			Masks.push_back(Mask);
+		}
+		return Masks;
 	}
 
 	// Followers and the spread component from an earlier grow.
@@ -352,8 +388,220 @@ namespace EclipseGrowthRunner
 
 		int32 Grown = 0;
 		TArray<FString> Problems;
+		const FString Generated = Folder / TEXT("Generated");
+
+		// A static mesh asset for one part of the output, placed as an actor
+		// attached to HostActor. Geometry is relative to Frame.Origin.
+		auto WriteStatic = [&](const eclipse::Mesh& Mesh, const EclipseBridge::FHost& Frame, const FString& AssetName,
+							   UMaterialInterface* Material, FName Slot, AActor* HostActor, const FName& HostTag,
+							   const FString& ActorLabel) -> bool
+		{
+			if (Mesh.triangleCount() == 0)
+			{
+				return true;  // nothing of this kind grew; not an error
+			}
+			FMeshDescription Description;
+			EclipseBridge::BuildMeshDescription(Mesh, Frame, /*bMeshLocal*/ false, Slot, Description);
+			UStaticMesh* Asset = EclipseBridge::WriteStaticMesh(Generated, AssetName, MoveTemp(Description), Material, Slot,
+				Settings.bEnableNanite, Error);
+			if (!Asset)
+			{
+				Problems.Add(FString::Printf(TEXT("%s: %s"), *ActorLabel, *Error.ToString()));
+				return false;
+			}
+			PlaceOutput(World, HostActor, Frame.Origin, Asset, HostTag, ActorLabel);
+			return true;
+		};
+
+		// Static meshes grow in groups: all of them as one surface, or one by
+		// one. The first of a group carries its growths and soft tissue.
+		auto GrowStaticGroup = [&](const TArray<FHostTarget>& Group)
+		{
+			struct FPiece
+			{
+				const FHostTarget* Host = nullptr;
+				EclipseBridge::FHost Source;
+				FString Label;
+			};
+			TArray<FPiece> Pieces;
+			size_t TotalVertices = 0;
+			for (const FHostTarget& Host : Group)
+			{
+				FPiece Piece;
+				Piece.Host = &Host;
+				Piece.Label = Host.Actor->GetActorLabel();
+				Task.EnterProgressFrame(1.0f, FText::Format(LOCTEXT("Preparing", "Preparing {0}"), FText::FromString(Piece.Label)));
+				if (!EclipseBridge::ReadHost(Host.Static, Piece.Source, Error))
+				{
+					Problems.Add(FString::Printf(TEXT("%s: %s"), *Piece.Label, *Error.ToString()));
+					continue;
+				}
+				eclipse::weldVertices(Piece.Source.Mesh, WeldTolerance);
+				if (!eclipse::subdivideToEdgeLength(Piece.Source.Mesh, Settings.Resolution * 0.01f, static_cast<size_t>(Settings.MaxVertices)))
+				{
+					Problems.Add(FString::Printf(TEXT("%s: more than %d vertices at %.1f cm resolution; raise Resolution"),
+						*Piece.Label, Settings.MaxVertices, Settings.Resolution));
+					continue;
+				}
+				TotalVertices += Piece.Source.Mesh.vertexCount();
+				Pieces.Add(MoveTemp(Piece));
+			}
+			if (Pieces.Num() == 0)
+			{
+				return;
+			}
+			if (TotalVertices > static_cast<size_t>(Settings.MaxVertices))
+			{
+				Problems.Add(FString::Printf(TEXT("%d meshes together: more than %d vertices at %.1f cm resolution; raise Resolution or Max Vertices"),
+					Pieces.Num(), Settings.MaxVertices, Settings.Resolution));
+				return;
+			}
+
+			// One frame for the group: everything relative to the first piece.
+			const FVector Origin = Pieces[0].Source.Origin;
+			std::vector<eclipse::Mesh> Meshes;
+			std::vector<eclipse::Vec3> Seeds;
+			for (const FPiece& Piece : Pieces)
+			{
+				eclipse::Mesh Mesh = Piece.Source.Mesh;
+				const eclipse::Vec3 Shift = EclipseBridge::ToEclipse(Piece.Source.Origin - Origin);
+				for (eclipse::Vec3& P : Mesh.positions)
+				{
+					P += Shift;
+				}
+				Meshes.push_back(std::move(Mesh));
+				for (const eclipse::Vec3& Seed : SeedsNear(World, Piece.Host->Component, Origin))
+				{
+					const bool bKnown = std::any_of(Seeds.begin(), Seeds.end(),
+						[&](const eclipse::Vec3& Other) { return eclipse::length(Other - Seed) < 1e-4f; });
+					if (!bKnown)
+					{
+						Seeds.push_back(Seed);
+					}
+				}
+			}
+			FString Labels = Pieces[0].Label;
+			for (int32 Index = 1; Index < Pieces.Num(); ++Index)
+			{
+				Labels += TEXT(", ") + Pieces[Index].Label;
+			}
+			if (Seeds.empty())
+			{
+				Problems.Add(FString::Printf(TEXT("%s: no enabled Eclipse Seed within 1 m"), *Labels));
+				return;
+			}
+			std::vector<const eclipse::Mesh*> Pointers;
+			for (const eclipse::Mesh& Mesh : Meshes)
+			{
+				Pointers.push_back(&Mesh);
+			}
+
+			Task.EnterProgressFrame(2.0f, FText::Format(LOCTEXT("GrowingGroup", "Growing over {0} ({1} vertices)"),
+				FText::FromString(Labels), FText::AsNumber(static_cast<int64>(TotalVertices))));
+			const eclipse::SceneGrowth Scene = eclipse::growScene(Pointers, Seeds, Params, Features,
+				Settings.bGrowAsOne ? Settings.ContactGap * 0.01f : 0.0f, MasksIn(World, Origin));
+			const eclipse::Growth& Result = Scene.growth;
+
+			// Each piece's surface, split back out of the whole.
+			std::vector<uint32_t> ShellSources, ShellOwner;
+			eclipse::Mesh Shell;
+			if (bOverlay)
+			{
+				Shell = eclipse::extractShell(Result.surface, OverlayLift, &ShellSources, Params.haloReach);
+				for (uint32_t Source : ShellSources)
+				{
+					ShellOwner.push_back(Scene.owner[Source]);
+				}
+			}
+			const eclipse::Mesh& Surfaces = bOverlay ? Shell : Result.surface;
+			const std::vector<uint32_t>& SurfaceOwner = bOverlay ? ShellOwner : Scene.owner;
+
+			Task.EnterProgressFrame(1.0f, LOCTEXT("Writing", "Writing meshes"));
+			FName PrimaryTag;
+			for (int32 Index = 0; Index < Pieces.Num(); ++Index)
+			{
+				const FPiece& Piece = Pieces[Index];
+				AActor* HostActor = Piece.Host->Actor;
+				const FString Base = TEXT("SM_Eclipse_") + ObjectTools::SanitizeObjectName(Piece.Label);
+				const FName HostTag(*(TEXT("EclipseHost_") + HostActor->GetName()));
+				if (Index == 0)
+				{
+					PrimaryTag = HostTag;
+				}
+				RemovePreviousOutput(World, HostTag);
+				RemovePreviousInstanceComponents(HostActor);
+
+				EclipseBridge::FHost Frame = Piece.Source;
+				Frame.Origin = Origin;  // the group's geometry is relative to its first piece
+				const eclipse::Mesh Part = eclipse::subMesh(Surfaces, SurfaceOwner, static_cast<uint32_t>(Index));
+				if (!WriteStatic(Part, Frame, Base + (bOverlay ? TEXT("_Shell") : TEXT("_Surface")),
+						bOverlay ? Materials.Overlay : Materials.Replace, SurfaceSlot, HostActor, HostTag,
+						Piece.Label + (bOverlay ? TEXT(" Eclipse_Shell") : TEXT(" Eclipse_Surface"))))
+				{
+					continue;
+				}
+				const float Spacing = 0.05f * Settings.FeatureScale;
+				const std::vector<eclipse::InfectionSample> Samples =
+					eclipse::sampleInfection(eclipse::subMesh(Result.surface, Scene.owner, static_cast<uint32_t>(Index)), Spacing);
+				if (!Samples.empty())
+				{
+					UEclipseInfectionMap* Map = WriteInfectionMap(Generated, TEXT("IM_Eclipse_") + ObjectTools::SanitizeObjectName(Piece.Label),
+						Samples, Origin, HostActor->GetActorTransform(), Spacing * 100.0f);
+					// Everything grown, including veins that ran ahead of the front and the
+					// growths that appear just after their tissue, fully revealed.
+					PlaceSpread(HostActor, Map, 1.0f + Settings.VeinReach + 0.15f);
+				}
+				if (!bOverlay)
+				{
+					// The corrupted surface stands in for the host entirely.
+					Piece.Host->Component->Modify();
+					Piece.Host->Component->SetVisibility(false);
+				}
+				++Grown;
+			}
+
+			// Growths and soft tissue for the whole group, carried by its first piece.
+			const FString Base = TEXT("SM_Eclipse_") + ObjectTools::SanitizeObjectName(Pieces[0].Label);
+			WriteStatic(Result.growths, Pieces[0].Source, Base + TEXT("_Growths"), Materials.Growths, GrowthsSlot,
+				Pieces[0].Host->Actor, PrimaryTag, Pieces[0].Label + TEXT(" Eclipse_Growths"));
+			WriteStatic(Result.flesh, Pieces[0].Source, Base + TEXT("_Flesh"), Materials.Flesh, FleshSlot,
+				Pieces[0].Host->Actor, PrimaryTag, Pieces[0].Label + TEXT(" Eclipse_Flesh"));
+		};
+
+		TArray<FHostTarget> Statics;
 		for (const FHostTarget& Host : Hosts)
 		{
+			if (!Host.Skeletal)
+			{
+				Statics.Add(Host);
+			}
+		}
+		if (Settings.bGrowAsOne)
+		{
+			if (Statics.Num() > 0)
+			{
+				GrowStaticGroup(Statics);
+			}
+		}
+		else
+		{
+			for (const FHostTarget& Host : Statics)
+			{
+				if (Task.ShouldCancel())
+				{
+					break;
+				}
+				GrowStaticGroup({Host});
+			}
+		}
+
+		// Characters, one by one: their corruption follows their own skeleton.
+		for (const FHostTarget& Host : Hosts)
+		{
+			if (!Host.Skeletal)
+			{
+				continue;
+			}
 			if (Task.ShouldCancel())
 			{
 				break;
@@ -394,7 +642,9 @@ namespace EclipseGrowthRunner
 
 			Task.EnterProgressFrame(2.0f, FText::Format(LOCTEXT("GrowingOne", "Growing over {0} ({1} vertices)"),
 				FText::FromString(Label), FText::AsNumber(static_cast<int64>(Source.Mesh.vertexCount()))));
-			eclipse::Growth Result = eclipse::grow(Source.Mesh, Seeds, Params, Features);
+			eclipse::GrowthGuide Guide;
+			eclipse::applyMaskVolumes(Source.Mesh, MasksIn(World, Source.Origin), Guide);
+			eclipse::Growth Result = eclipse::grow(Source.Mesh, Seeds, Params, Features, &Guide);
 			std::vector<uint32_t> ShellSources;
 			const eclipse::Mesh Surface = bOverlay ? eclipse::extractShell(Result.surface, OverlayLift, &ShellSources, Params.haloReach) : std::move(Result.surface);
 			eclipse::SkinTable SurfaceSkin, GrowthSkin, FleshSkin;
@@ -419,7 +669,6 @@ namespace EclipseGrowthRunner
 					return true;  // nothing of this kind grew; not an error
 				}
 				FMeshDescription Description;
-				const FString Generated = Folder / TEXT("Generated");
 				if (bSkeletal)
 				{
 					if (MeshSkin.size() != Mesh.vertexCount())

@@ -81,6 +81,14 @@ Next on characters: strands that swing (physics or AnimDynamics), carrying morph
 - **Formations**: spires, ribcages, pods and shelf fungus, large set pieces placed before the smaller growths so those keep out of their space.
 - **Presets**: Eclipse, Creep, Thornfield, Rootmass, Hive, Carcass, Cathedral; in the CLI (`--preset`) and the panel (a dropdown that rewrites the look settings).
 
+## Rooms and art direction
+
+- **Scene growth**: separate meshes that touch grow as one surface (contact links between pieces), split back per mesh for output.
+- **Mask volumes**: Block, Bare and Dense boxes and spheres with soft edges; the Eclipse Mask actor in Unreal.
+- **Variations**: Previous and Next Variation in the panel; `--variations N` in the CLI.
+
+Next here: painting masks directly on surfaces (vertex paint) as well as volumes.
+
 ## Later
 
 - Strands that swing (physics or AnimDynamics) on characters.

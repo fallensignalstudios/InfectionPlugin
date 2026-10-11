@@ -18,6 +18,7 @@
 #include "eclipse/growths.h"
 #include "eclipse/hosts.h"
 #include "eclipse/presets.h"
+#include "eclipse/scene.h"
 #include "eclipse/preview.h"
 
 using namespace eclipse;
@@ -49,6 +50,11 @@ void usage() {
         "  --max-edge METRES      OBJ hosts: subdivide until no edge is longer (try 0.01)\n"
         "  --no-preview           skip the PNG previews\n"
         "  --focus X,Y,Z,R        preview a close-up of what lies within R of X,Y,Z\n"
+        "  --mask MODE:SHAPE:X,Y,Z:HX,HY,HZ[:FALLOFF]\n"
+        "                         a mask volume, repeatable. MODE block, bare or dense; SHAPE box or\n"
+        "                         sphere (radius HX). e.g. block:box:0,0,0:0.3,1,1.5:0.1\n"
+        "  --contact-gap METRES   pieces of the kit host closer than this spread into each other (0.02)\n"
+        "  --variations N         preview N seeds side by side, from --seed up, and stop\n"
         "  --detail-maps          write the materials' detail maps, lit, as PNGs and stop\n");
 }
 
@@ -102,6 +108,30 @@ Image litDetail(const DetailMap& map) {
     return im;
 }
 
+// MODE:SHAPE:X,Y,Z:HX,HY,HZ[:FALLOFF]
+bool parseMask(const std::string& spec, std::vector<MaskVolume>& out) {
+    std::vector<std::string> parts;
+    std::stringstream ss(spec);
+    std::string part;
+    while (std::getline(ss, part, ':')) parts.push_back(part);
+    if (parts.size() < 4 || parts.size() > 5) return false;
+    MaskVolume m;
+    if (parts[0] == "block") m.mode = MaskVolume::Mode::Block;
+    else if (parts[0] == "bare") m.mode = MaskVolume::Mode::Bare;
+    else if (parts[0] == "dense") m.mode = MaskVolume::Mode::Dense;
+    else return false;
+    if (parts[1] == "box") m.shape = MaskVolume::Shape::Box;
+    else if (parts[1] == "sphere") m.shape = MaskVolume::Shape::Sphere;
+    else return false;
+    std::vector<float> c, h;
+    if (!parseFloats(parts[2], c) || c.size() != 3 || !parseFloats(parts[3], h) || h.empty()) return false;
+    m.centre = {c[0], c[1], c[2]};
+    m.halfExtents = {h[0], h.size() > 1 ? h[1] : h[0], h.size() > 2 ? h[2] : h[0]};
+    if (parts.size() == 5) m.falloff = std::strtof(parts[4].c_str(), nullptr);
+    out.push_back(m);
+    return true;
+}
+
 // Only the triangles with a corner within radius of centre, for close-ups.
 Mesh cropToSphere(const Mesh& mesh, const Vec3& centre, float radius) {
     Mesh out;
@@ -138,6 +168,9 @@ int main(int argc, char** argv) {
     std::vector<Vec3> seeds;
     bool preview = true, obj = false, plateSizeGiven = false, scaleGiven = false, overlay = false;
     std::vector<float> focus;  // x, y, z, radius: preview only what lies within
+    std::vector<MaskVolume> masks;
+    float contactGap = 0.02f;
+    int variations = 0;
     bool detailMaps = false;
     float weld = 1e-4f, maxEdge = 0.0f;
     FeatureParams features;
@@ -186,6 +219,12 @@ int main(int argc, char** argv) {
         }
         else if (a == "--stages") {
             if (!parseFloats(next(), stages)) { usage(); return 2; }
+        } else if (a == "--mask") {
+            if (!parseMask(next(), masks)) { usage(); return 2; }
+        } else if (a == "--contact-gap") {
+            contactGap = std::strtof(next().c_str(), nullptr);
+        } else if (a == "--variations") {
+            variations = std::atoi(next().c_str());
         } else if (a == "--focus") {
             if (!parseFloats(next(), focus) || focus.size() != 4) { usage(); return 2; }
         } else if (a == "--seed-at") {
@@ -214,15 +253,18 @@ int main(int argc, char** argv) {
 
     auto t0 = std::chrono::steady_clock::now();
     Mesh host;
+    std::vector<Mesh> pieces;  // a host of separate meshes
     std::string hostName = hostArg;
     bool builtin = false;
     for (const auto& name : builtinHostNames()) builtin = builtin || name == hostArg;
     if (builtin) {
         BuiltinHost b = makeBuiltinHost(hostArg, cell);
         host = std::move(b.mesh);
+        pieces = std::move(b.pieces);
         if (seeds.empty()) seeds = b.defaultSeeds;
-        if (hostArg == "corridor" && !plateSizeGiven) params.plateSize = 0.18f;  // architecture-scale plates
-        if (hostArg == "corridor" && !scaleGiven) features.scale = 2.0f;
+        const bool room = hostArg == "corridor" || hostArg == "kit";
+        if (room && !plateSizeGiven) params.plateSize = 0.18f;  // architecture-scale plates
+        if (room && !scaleGiven) features.scale = 2.0f;
     } else {
         std::string err;
         if (!readObj(hostArg, host, &err)) {
@@ -250,11 +292,44 @@ int main(int argc, char** argv) {
     std::filesystem::create_directories(outDir);
     if (stages.empty()) stages.push_back(params.coverage);
 
+    // Separate pieces, or any masks, grow as a scene; otherwise the plain way.
+    std::vector<const Mesh*> piecePointers;
+    for (const Mesh& piece : pieces) piecePointers.push_back(&piece);
+    if (piecePointers.empty()) piecePointers.push_back(&host);
+    if (pieces.size() > 1) std::printf("  %zu separate pieces, contact gap %.3f m\n", pieces.size(), contactGap);
+    auto growHost = [&](const GrowthParams& p) {
+        if (pieces.size() > 1 || !masks.empty()) return growScene(piecePointers, seeds, p, features, contactGap, masks).growth;
+        return grow(host, seeds, p, features);
+    };
+
+    if (variations > 0) {
+        std::vector<Image> sheet;
+        for (int i = 0; i < variations; ++i) {
+            GrowthParams p = params;
+            p.seed = params.seed + static_cast<uint32_t>(i);
+            Growth g = growHost(p);
+            Mesh grown = g.surface;
+            grown.append(g.growths);
+            grown.append(g.flesh);
+            if (!focus.empty()) grown = cropToSphere(grown, {focus[0], focus[1], focus[2]}, focus[3]);
+            PreviewOptions opts;
+            opts.yaws = {builtin && hostArg != "mannequin" ? 30.0f : 0.0f};
+            opts.width = 640;
+            opts.height = 760;
+            sheet.push_back(renderPreview(grown, opts));
+            std::printf("  seed %u done\n", p.seed);
+        }
+        char tag[96];
+        std::snprintf(tag, sizeof tag, "%s_s%u_variations.png", hostName.c_str(), params.seed);
+        writePng((std::filesystem::path(outDir) / tag).string(), hconcat(sheet));
+        return 0;
+    }
+
     std::vector<Image> strip;
     for (size_t s = 0; s < stages.size(); ++s) {
         GrowthParams p = params;
         p.coverage = stages[s];
-        Growth g = grow(host, seeds, p, features);
+        Growth g = growHost(p);
         char tag[64];
         std::snprintf(tag, sizeof tag, "%s_s%u_c%03d", hostName.c_str(), p.seed, static_cast<int>(p.coverage * 100 + 0.5f));
         std::string base = (std::filesystem::path(outDir) / tag).string();
@@ -286,12 +361,12 @@ int main(int argc, char** argv) {
             if (!focus.empty()) grown = cropToSphere(grown, {focus[0], focus[1], focus[2]}, focus[3]);
             PreviewOptions opts;
             if (stages.size() > 1) {
-                opts.yaws = {builtin && hostArg == "corridor" ? 30.0f : 0.0f};
+                opts.yaws = {builtin && hostArg != "mannequin" ? 30.0f : 0.0f};
                 opts.width = 640;
                 opts.height = 760;
                 strip.push_back(renderPreview(grown, opts));
             } else {
-                if (builtin && hostArg == "corridor") opts.yaws = {30.0f, -20.0f};
+                if (builtin && hostArg != "mannequin") opts.yaws = {30.0f, -20.0f};
                 writePng(base + ".png", renderPreview(grown, opts));
             }
         }

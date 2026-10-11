@@ -69,6 +69,34 @@ rather than exceed **Max Vertices**.
 Vertices that are split along UV or smoothing seams are welded first, so the
 spread crosses those seams. Generated meshes have Nanite enabled by default.
 
+### Rooms and masks
+
+Select every mesh of a room (floor tiles, walls, props) and press **Grow on
+Selected**: with **Grow as One** on (Mesh, the default) the static meshes grow
+as one surface, the corruption crossing from piece to piece wherever they come
+within **Contact Gap** (2 cm), from the seeds near any of them. Each piece gets
+its own shell, infection map and Eclipse Spread component; the growths and soft
+tissue of the whole room are attached to the first piece selected. Turn Grow as
+One off to grow each mesh on its own. Characters always grow on their own.
+
+Place **Eclipse Mask** actors (Place Actors panel) to shape where it goes.
+Scale the box over the area, or switch its Shape to Sphere:
+
+| Mode | Colour | Effect |
+|---|---|---|
+| Block | red | The corruption never enters, and routes around: walkways, doors, gameplay space. |
+| Bare | yellow | The surface may corrupt but nothing grows on it: no horns where players walk. |
+| Dense | violet | The corruption is drawn here first, so it is oldest and most overgrown. |
+
+**Falloff** softens the edge; **Strength** below 1 makes a Block only slow and
+thin the corruption, and a Dense pull less hard. Every enabled mask in the
+level applies to every grow, on characters too. Masks are editor-only.
+
+**Previous Variation** and **Next Variation** step the Seed and grow the
+selection again: the same settings, a different growth.
+
+![Separate meshes grown as one, then with masks](previews/scene_masks.jpg)
+
 **Preset** (at the top of the panel) picks a starting look: Eclipse, Creep,
 Thornfield, Rootmass, Hive, Carcass or Cathedral (see the README). Choosing one
 rewrites the settings below it to match, ready to tweak; seed, coverage,
@@ -244,7 +272,7 @@ Editor, Game Development and Game Shipping builds have passed with precompiled
 headers and unity builds disabled (`-NoPCH -NoSharedPCH -DisableUnity`, the
 flags used by `BuildPlugin -StrictIncludes`), with the 35 standalone tests and
 six Unreal automation tests passing, as of the live-spread fixes. The realism
-pass adds standalone tests (51 now) and a materials automation test; its
+pass adds standalone tests (54 now) and a materials automation test; its
 engine side awaits the same build. Run all Unreal tests with
 `Automation RunTests Infection`: they check skeletal corruption-channel bytes,
 skeletal regeneration after host changes, sparse-map queries, and live-spread

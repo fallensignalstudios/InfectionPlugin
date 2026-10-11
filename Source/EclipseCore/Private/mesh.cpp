@@ -76,6 +76,27 @@ VertexGraph VertexGraph::build(const Mesh& mesh) {
     return g;
 }
 
+VertexGraph VertexGraph::withLinks(const std::vector<std::array<uint32_t, 2>>& links) const {
+    const size_t n = offsets.empty() ? 0 : offsets.size() - 1;
+    std::vector<std::vector<uint32_t>> lists(n);
+    for (uint32_t v = 0; v < n; ++v) lists[v].assign(neighbours.begin() + offsets[v], neighbours.begin() + offsets[v + 1]);
+    for (const auto& link : links) {
+        if (link[0] >= n || link[1] >= n || link[0] == link[1]) continue;
+        lists[link[0]].push_back(link[1]);
+        lists[link[1]].push_back(link[0]);
+    }
+    VertexGraph g;
+    g.offsets.resize(n + 1, 0);
+    for (size_t v = 0; v < n; ++v) {
+        auto& l = lists[v];
+        std::sort(l.begin(), l.end());
+        l.erase(std::unique(l.begin(), l.end()), l.end());
+        g.offsets[v + 1] = g.offsets[v] + static_cast<uint32_t>(l.size());
+    }
+    for (auto& l : lists) g.neighbours.insert(g.neighbours.end(), l.begin(), l.end());
+    return g;
+}
+
 VertexGraph VertexGraph::twoRing() const {
     const size_t n = offsets.empty() ? 0 : offsets.size() - 1;
     VertexGraph g;
