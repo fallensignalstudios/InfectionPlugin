@@ -49,15 +49,34 @@ namespace EclipseBridge
 	void BuildMeshDescription(const eclipse::Mesh& Mesh, const FHost& Host, bool bMeshLocal, FName SlotName,
 		FMeshDescription& Out, const eclipse::SkinTable* Skin = nullptr);
 
+	// How a generated mesh is built.
+	struct FOutputOptions
+	{
+		bool bNanite = true;
+		// Levels of detail, LOD 0 included; the rest are reduced by the engine
+		// at build time, each keeping LODReduction of the triangles before it.
+		// Nanite static meshes keep one.
+		int32 LODCount = 1;
+		float LODReduction = 0.5f;
+		// Collide against the mesh's own triangles (complex as simple).
+		bool bCollision = false;
+	};
+
+	// The share of LOD 0's triangles that LOD Index keeps.
+	float LODTriangleShare(int32 Index, float Reduction);
+
 	// Creates the asset, or rebuilds it in place if it already exists, with a
 	// single material slot. The package is left dirty for the user to save.
 	UStaticMesh* WriteStaticMesh(const FString& PackagePath, const FString& AssetName, FMeshDescription&& Description,
-		UMaterialInterface* Material, FName SlotName, bool bNanite, FText& OutError);
+		UMaterialInterface* Material, FName SlotName, const FOutputOptions& Options, FText& OutError);
 
 	// A skeletal mesh on the template's skeleton, created as a copy of the
-	// template (or rebuilt in place), reduced to one LOD with one material.
+	// template (or rebuilt in place) with one material and only its own
+	// LODs: LOD 0 from Description, the rest reduced from it (LODCount and
+	// LODReduction of Options; the rest of Options does not apply).
 	USkeletalMesh* WriteSkeletalMesh(USkeletalMesh* Template, const FString& PackagePath, const FString& AssetName,
-		FMeshDescription&& Description, UMaterialInterface* Material, FName SlotName, FText& OutError);
+		FMeshDescription&& Description, UMaterialInterface* Material, FName SlotName, FText& OutError,
+		const FOutputOptions& Options = FOutputOptions());
 
 	// Writes a bool or enum UPROPERTY by name. Used for engine fields whose C++
 	// access has changed between engine versions; the reflected name has not.

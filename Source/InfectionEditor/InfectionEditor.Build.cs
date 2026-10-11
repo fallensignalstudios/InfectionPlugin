@@ -17,6 +17,7 @@ public class InfectionEditor : ModuleRules
 			"InputCore",
 			"MaterialEditor",
 			"MeshDescription",
+			"PhysicsCore",
 			"PropertyEditor",
 			"RHI",
 			"RenderCore",

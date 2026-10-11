@@ -3,6 +3,15 @@
 The plugin's version is in `InfectionPlugin.uplugin` (`VersionName`). Unreal
 side changes need **Rebuild Materials** once when the materials changed.
 
+## 0.5.0
+
+- **LODs**: generated static meshes without Nanite carry engine-reduced LODs
+  (Performance → LOD Count, LOD Reduction); character outputs always do.
+- **Collision**: None, Traces or Block, separately for the surface and the
+  growths, against the corruption's own triangles; an optional Physical
+  Material for footsteps and impacts. Outputs used to have no collision; the
+  new default is Traces.
+
 ## 0.4.0
 
 - **Runtime**: outbreaks (`StartOutbreak`) reveal the corruption outward from

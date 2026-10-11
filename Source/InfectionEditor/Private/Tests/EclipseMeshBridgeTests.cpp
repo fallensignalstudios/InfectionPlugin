@@ -5,10 +5,12 @@
 #include "Animation/Skeleton.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/SkinnedAssetCommon.h"
+#include "Engine/StaticMesh.h"
 #include "MaterialDomain.h"
 #include "Materials/Material.h"
 #include "MeshDescription.h"
 #include "Misc/AutomationTest.h"
+#include "PhysicsEngine/BodySetup.h"
 #include "PhysicsEngine/PhysicsAsset.h"
 #include "ReferenceSkeleton.h"
 #include "Rendering/SkeletalMeshLODImporterData.h"
@@ -171,6 +173,93 @@ bool FEclipseSkeletalRegrowTemplateTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("The inverse bind matrix is rebuilt even with the same bone count"), Reposed->GetRefBasesInvMatrix()[1].Equals(PreviousInverse));
 	TestTrue(TEXT("The edited host's inverse bind matrix reaches the output"),
 		Reposed->GetRefBasesInvMatrix()[1].Equals(TemplateB->GetRefBasesInvMatrix()[1]));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEclipseStaticLODCollisionTest,
+	"Infection.Editor.StaticMesh.LODsAndCollision",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FEclipseStaticLODCollisionTest::RunTest(const FString& Parameters)
+{
+	const FString Folder = TEXT("/Temp/InfectionPluginTests/") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	auto Description = []
+	{
+		eclipse::Mesh Geometry;
+		Geometry.positions = {{0.0f, 0.0f, 0.0f}, {0.1f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.1f}, {0.1f, 0.0f, 0.1f}};
+		Geometry.triangles = {{0, 2, 1}, {1, 2, 3}};
+		Geometry.normals.resize(4, eclipse::Vec3(0.0f, 1.0f, 0.0f));
+		Geometry.attributes.resize(4);
+		EclipseBridge::FHost Host;
+		Host.Transform = FTransform::Identity;
+		FMeshDescription Out;
+		EclipseBridge::BuildMeshDescription(Geometry, Host, false, TestSlot, Out);
+		return Out;
+	};
+	FText Error;
+	EclipseBridge::FOutputOptions Options;
+	Options.bNanite = false;
+	Options.LODCount = 4;
+	Options.LODReduction = 0.5f;
+	Options.bCollision = true;
+	UStaticMesh* Mesh = EclipseBridge::WriteStaticMesh(Folder, TEXT("SM_Eclipse_LODs"), Description(),
+		UMaterial::GetDefaultMaterial(MD_Surface), TestSlot, Options, Error);
+	if (!TestNotNull(TEXT("The static output is written"), Mesh))
+	{
+		AddError(Error.ToString());
+		return false;
+	}
+	TestEqual(TEXT("Without Nanite it carries the LODs asked for"), Mesh->GetNumSourceModels(), 4);
+	TestEqual(TEXT("LOD 0 is not reduced"), Mesh->GetSourceModel(0).ReductionSettings.PercentTriangles, 1.0f);
+	TestEqual(TEXT("Each LOD keeps half of the one before"), Mesh->GetSourceModel(3).ReductionSettings.PercentTriangles, 0.125f);
+	TestTrue(TEXT("Collision uses the corruption's own triangles"),
+		Mesh->GetBodySetup() && Mesh->GetBodySetup()->CollisionTraceFlag == CTF_UseComplexAsSimple);
+
+	Options.bNanite = true;
+	Options.bCollision = false;
+	Mesh = EclipseBridge::WriteStaticMesh(Folder, TEXT("SM_Eclipse_LODs"), Description(),
+		UMaterial::GetDefaultMaterial(MD_Surface), TestSlot, Options, Error);
+	if (!TestNotNull(TEXT("The static output is rewritten"), Mesh))
+	{
+		AddError(Error.ToString());
+		return false;
+	}
+	TestEqual(TEXT("A Nanite rewrite drops back to one LOD"), Mesh->GetNumSourceModels(), 1);
+	TestTrue(TEXT("Without collision the trace flag is the default"),
+		Mesh->GetBodySetup() && Mesh->GetBodySetup()->CollisionTraceFlag == CTF_UseDefault);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEclipseSkeletalLODTest,
+	"Infection.Editor.SkeletalMesh.GeneratesReducedLODs",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FEclipseSkeletalLODTest::RunTest(const FString& Parameters)
+{
+	TStrongObjectPtr<USkeletalMesh> Template(NewObject<USkeletalMesh>(GetTransientPackage(), NAME_None, RF_Transient));
+	if (!TestTrue(TEXT("The skeletal fixture builds"), InitializeTemplate(Template.Get(), TEXT("joint"), FVector(25.0, 0.0, 0.0))))
+	{
+		return false;
+	}
+	const FString Folder = TEXT("/Temp/InfectionPluginTests/") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	FText Error;
+	EclipseBridge::FOutputOptions Options;
+	Options.LODCount = 3;
+	USkeletalMesh* Mesh = EclipseBridge::WriteSkeletalMesh(Template.Get(), Folder, TEXT("SK_Eclipse_LODs"), TestDescription(),
+		UMaterial::GetDefaultMaterial(MD_Surface), TestSlot, Error, Options);
+	if (!TestNotNull(TEXT("The skeletal output is written"), Mesh))
+	{
+		AddError(Error.ToString());
+		return false;
+	}
+	TestEqual(TEXT("It carries the LODs asked for"), Mesh->GetLODNum(), 3);
+	TestEqual(TEXT("LOD 2 keeps a quarter of LOD 0"), Mesh->GetLODInfo(2)->ReductionSettings.NumOfTrianglesPercentage, 0.25f);
+	TestEqual(TEXT("reduced from LOD 0"), Mesh->GetLODInfo(2)->ReductionSettings.BaseLOD, 0);
+
+	Options.LODCount = 1;
+	Mesh = EclipseBridge::WriteSkeletalMesh(Template.Get(), Folder, TEXT("SK_Eclipse_LODs"), TestDescription(),
+		UMaterial::GetDefaultMaterial(MD_Surface), TestSlot, Error, Options);
+	TestTrue(TEXT("Growing again with fewer LODs removes the rest"), Mesh && Mesh->GetLODNum() == 1);
 	return true;
 }
 

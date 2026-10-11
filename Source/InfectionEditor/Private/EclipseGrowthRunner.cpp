@@ -17,9 +17,11 @@
 #include "Engine/Selection.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/CollisionProfile.h"
 #include "Engine/StaticMeshActor.h"
 #include "EngineUtils.h"
 #include "MeshDescription.h"
+#include "PhysicalMaterials/PhysicalMaterial.h"
 #include "Misc/ScopedSlowTask.h"
 #include "UObject/Package.h"
 #include "ObjectTools.h"
@@ -354,8 +356,43 @@ namespace
 		}
 	}
 
+	EclipseBridge::FOutputOptions ToOutputOptions(const UEclipseGrowthSettings& S, EEclipseCollision Collision)
+	{
+		EclipseBridge::FOutputOptions O;
+		O.bNanite = S.bEnableNanite;
+		O.LODCount = S.LODCount;
+		O.LODReduction = S.LODReduction;
+		O.bCollision = Collision != EEclipseCollision::None;
+		return O;
+	}
+
+	// Sets what a placed output collides with (see EEclipseCollision).
+	void ApplyCollision(UPrimitiveComponent* Component, EEclipseCollision Collision, UPhysicalMaterial* Surface)
+	{
+		switch (Collision)
+		{
+		case EEclipseCollision::None:
+			Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			Component->SetCanEverAffectNavigation(false);
+			break;
+		case EEclipseCollision::Traces:
+			Component->SetCollisionProfileName(UCollisionProfile::CustomCollisionProfileName);
+			Component->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+			Component->SetCollisionObjectType(ECC_WorldDynamic);
+			Component->SetCollisionResponseToAllChannels(ECR_Ignore);
+			Component->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+			Component->SetCanEverAffectNavigation(false);
+			break;
+		case EEclipseCollision::Block:
+			Component->SetCollisionProfileName(UCollisionProfile::BlockAllDynamic_ProfileName);
+			Component->SetCanEverAffectNavigation(true);
+			break;
+		}
+		Component->SetPhysMaterialOverride(Collision != EEclipseCollision::None ? Surface : nullptr);
+	}
+
 	AStaticMeshActor* PlaceOutput(UWorld* World, AActor* Host, const FVector& Origin, UStaticMesh* Mesh,
-		const FName& HostTag, const FString& Label)
+		const FName& HostTag, const FString& Label, EEclipseCollision Collision, UPhysicalMaterial* Surface)
 	{
 		FActorSpawnParameters Params;
 		Params.ObjectFlags |= RF_Transactional;
@@ -368,7 +405,7 @@ namespace
 		// Movable: the meshes carry growth data, not lightmap UVs.
 		Component->SetMobility(EComponentMobility::Movable);
 		Component->SetStaticMesh(Mesh);
-		Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		ApplyCollision(Component, Collision, Surface);
 		Actor->Tags.Add(GeneratedTag);
 		Actor->Tags.Add(HostTag);
 		Actor->SetActorLabel(Label);
@@ -403,6 +440,12 @@ namespace EclipseGrowthRunner
 		const eclipse::GrowthParams Params = ToGrowthParams(Settings);
 		const eclipse::FeatureParams Features = ToFeatureParams(Settings);
 		const bool bOverlay = Settings.OutputMode == EEclipseOutputMode::Overlay;
+		UPhysicalMaterial* Surface = Settings.PhysicalMaterial.LoadSynchronous();
+		// Which collision a part of the output gets, by its material slot.
+		auto CollisionFor = [&](FName Slot)
+		{
+			return Slot == SurfaceSlot ? Settings.SurfaceCollision : Settings.GrowthCollision;
+		};
 
 		FScopedTransaction Transaction(LOCTEXT("GrowTransaction", "Grow Eclipse Corruption"));
 		FScopedSlowTask Task(static_cast<float>(Hosts.Num() * 4), LOCTEXT("Growing", "Growing Eclipse corruption"));
@@ -425,13 +468,13 @@ namespace EclipseGrowthRunner
 			FMeshDescription Description;
 			EclipseBridge::BuildMeshDescription(Mesh, Frame, /*bMeshLocal*/ false, Slot, Description);
 			UStaticMesh* Asset = EclipseBridge::WriteStaticMesh(Generated, AssetName, MoveTemp(Description), Material, Slot,
-				Settings.bEnableNanite, Error);
+				ToOutputOptions(Settings, CollisionFor(Slot)), Error);
 			if (!Asset)
 			{
 				Problems.Add(FString::Printf(TEXT("%s: %s"), *ActorLabel, *Error.ToString()));
 				return false;
 			}
-			PlaceOutput(World, HostActor, Frame.Origin, Asset, HostTag, ActorLabel);
+			PlaceOutput(World, HostActor, Frame.Origin, Asset, HostTag, ActorLabel, CollisionFor(Slot), Surface);
 			return true;
 		};
 
@@ -696,7 +739,7 @@ namespace EclipseGrowthRunner
 					}
 					EclipseBridge::BuildMeshDescription(Mesh, Source, /*bMeshLocal*/ true, Slot, Description, &MeshSkin);
 					USkeletalMesh* Asset = EclipseBridge::WriteSkeletalMesh(Host.Skeletal->GetSkeletalMeshAsset(), Generated,
-						Base + Suffix, MoveTemp(Description), Material, Slot, Error);
+						Base + Suffix, MoveTemp(Description), Material, Slot, Error, ToOutputOptions(Settings, EEclipseCollision::None));
 					if (!Asset)
 					{
 						Problems.Add(FString::Printf(TEXT("%s: %s"), *Label, *Error.ToString()));
@@ -707,13 +750,14 @@ namespace EclipseGrowthRunner
 				}
 				EclipseBridge::BuildMeshDescription(Mesh, Source, /*bMeshLocal*/ false, Slot, Description);
 				UStaticMesh* Asset = EclipseBridge::WriteStaticMesh(Generated, Base + Suffix,
-					MoveTemp(Description), Material, Slot, Settings.bEnableNanite, Error);
+					MoveTemp(Description), Material, Slot, ToOutputOptions(Settings, CollisionFor(Slot)), Error);
 				if (!Asset)
 				{
 					Problems.Add(FString::Printf(TEXT("%s: %s"), *Label, *Error.ToString()));
 					return false;
 				}
-				PlaceOutput(World, Host.Actor, Source.Origin, Asset, HostTag, Label + TEXT(" Eclipse") + Suffix);
+				PlaceOutput(World, Host.Actor, Source.Origin, Asset, HostTag, Label + TEXT(" Eclipse") + Suffix,
+					CollisionFor(Slot), Surface);
 				return true;
 			};
 			const bool bOk = Write(Surface, SurfaceSkin, bOverlay ? TEXT("_Shell") : TEXT("_Surface"),

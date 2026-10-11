@@ -104,6 +104,7 @@ Next here: growing new corruption on the fly onto meshes that were never grown (
 - **Save games**: `GetState` / `RestoreState` with an `Eclipse Spread State`.
 - **Remove from Selected** in the panel (and `UEclipseEditorLibrary::RemoveFromSelection`): undoable clean-up that shows hosts a Replace grow hid.
 - A `LogEclipse` log category, a changelog, and the plugin version in step with it.
+- **LODs** on generated meshes without Nanite and on characters; **collision** (None, Traces, Block) for the surface and the growths, with a physical material.
 
 ## Later
 
