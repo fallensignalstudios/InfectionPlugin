@@ -43,9 +43,48 @@ SdfModel corridorModel() {
     return m;
 }
 
-std::vector<std::string> builtinHostNames() { return {"mannequin", "corridor"}; }
+std::vector<std::string> builtinHostNames() { return {"mannequin", "corridor", "kit"}; }
+
+namespace {
+
+BuiltinHost makeKit(float cellSize) {
+    BuiltinHost host;
+    host.name = "kit";
+    host.defaultSeeds = {{-0.6f, 0.0f, 0.4f}};
+    struct Part {
+        SdfModel model;
+        Vec3 lo, hi;
+    };
+    std::vector<Part> parts(5);
+    const Vec3 pad{cellSize * 2, cellSize * 2, cellSize * 2};
+    parts[0].model.box({0, -0.05f, 0}, {1.5f, 0.05f, 1.5f}, 0.0f, 0.0f);  // floor
+    parts[0].lo = {-1.5f, -0.1f - pad.y, -1.5f};
+    parts[0].hi = {1.45f, pad.y, 1.45f};
+    parts[1].model.box({0, 1.4f, -1.45f}, {1.5f, 1.4f, 0.05f}, 0.0f, 0.04f);  // back wall
+    parts[1].lo = {-1.5f, -pad.y, -1.5f};
+    parts[1].hi = {1.45f, 2.8f, -1.4f + pad.z};
+    parts[2].model.box({-1.45f, 1.4f, 0}, {0.05f, 1.4f, 1.5f}, 0.0f, 0.04f);  // side wall
+    parts[2].lo = {-1.5f, -pad.y, -1.5f};
+    parts[2].hi = {-1.4f + pad.x, 2.8f, 1.45f};
+    parts[3].model.box({-0.85f, 0.35f, -0.85f}, {0.35f, 0.35f, 0.35f}, 0.03f, 0.03f);  // crate
+    parts[3].lo = Vec3{-1.2f, 0.0f, -1.2f} - pad;
+    parts[3].hi = Vec3{-0.5f, 0.7f, -0.5f} + pad;
+    parts[4].model.roundCone({0.8f, 0.0f, -0.6f}, {0.8f, 2.8f, -0.6f}, 0.16f, 0.13f, 0.06f);  // column
+    parts[4].lo = Vec3{0.6f, 0.0f, -0.8f} - pad;
+    parts[4].hi = Vec3{1.0f, 2.8f, -0.4f} + pad;
+    for (Part& part : parts) {
+        Mesh piece = polygonize([&](const Vec3& p) { return part.model.evaluate(p); }, part.lo, part.hi, cellSize);
+        piece.computeNormals();
+        host.mesh.append(piece);
+        host.pieces.push_back(std::move(piece));
+    }
+    return host;
+}
+
+}  // namespace
 
 BuiltinHost makeBuiltinHost(const std::string& name, float cellSize) {
+    if (name == "kit") return makeKit(cellSize);
     BuiltinHost host;
     host.name = name;
     SdfModel model;

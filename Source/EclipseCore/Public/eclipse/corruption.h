@@ -47,6 +47,20 @@ struct GrowthParams {
     float roughness = 0.0025f;   // amplitude of the knotted surface detail
 };
 
+// Shapes a growth from outside the mesh: links between separate pieces of a
+// scene, so the spread crosses where they touch, and per-vertex masks (from
+// mask volumes, see eclipse/scene.h). Empty arrays mean no mask.
+struct GrowthGuide {
+    std::vector<std::array<uint32_t, 2>> links;
+    std::vector<float> block;  // 0..1: 1 the corruption never enters; between, it is slowed and thinned
+    std::vector<float> bare;   // 0..1: above 0.5 the surface may corrupt but nothing grows on it
+    std::vector<float> dense;  // 0..1: the corruption is drawn here first, so it is oldest and most overgrown
+
+    float blockAt(uint32_t v) const { return v < block.size() ? block[v] : 0.0f; }
+    float bareAt(uint32_t v) const { return v < bare.size() ? bare[v] : 0.0f; }
+    float denseAt(uint32_t v) const { return v < dense.size() ? dense[v] : 0.0f; }
+};
+
 // The spread over one mesh before any displacement. Kept separate so tools
 // and tests can inspect it.
 struct SpreadField {
@@ -85,7 +99,7 @@ struct PlateLayout {
 ECLIPSECORE_API uint32_t nearestVertex(const Mesh& mesh, const Vec3& p);
 
 ECLIPSECORE_API SpreadField computeSpread(const Mesh& host, const VertexGraph& graph, const std::vector<Vec3>& seeds,
-                          const GrowthParams& params);
+                          const GrowthParams& params, const GrowthGuide* guide = nullptr);
 ECLIPSECORE_API VeinNetwork computeVeins(const Mesh& host, const SpreadField& spread,
                          const GrowthParams& params);
 ECLIPSECORE_API PlateLayout computePlates(const Mesh& host, const VertexGraph& graph, const SpreadField& spread,
@@ -100,7 +114,8 @@ struct SurfaceGrowth {
     PlateLayout plates;
 };
 
-ECLIPSECORE_API SurfaceGrowth growSurface(const Mesh& host, const std::vector<Vec3>& seeds, const GrowthParams& params);
+ECLIPSECORE_API SurfaceGrowth growSurface(const Mesh& host, const std::vector<Vec3>& seeds, const GrowthParams& params,
+                                          const GrowthGuide* guide = nullptr);
 
 // Just the corrupted surface; see growSurface.
 ECLIPSECORE_API Mesh corrupt(const Mesh& host, const std::vector<Vec3>& seeds, const GrowthParams& params);

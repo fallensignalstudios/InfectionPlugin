@@ -49,6 +49,7 @@ add_library(eclipse_core ${ECLIPSE_CORE_KIND}
   Source/EclipseCore/Private/noise.cpp
   Source/EclipseCore/Private/presets.cpp
   Source/EclipseCore/Private/preview.cpp
+  Source/EclipseCore/Private/scene.cpp
   Source/EclipseCore/Private/sdf.cpp
   Source/EclipseCore/Private/skin.cpp
   Source/EclipseCore/Private/spatial.cpp

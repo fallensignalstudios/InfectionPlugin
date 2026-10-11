@@ -35,6 +35,7 @@ struct Context {
     PointGrid grid;
     InsideTest inside;
     Mesh* fleshOut = nullptr;         // soft tissue goes here, hard growths to `out`
+    const GrowthGuide* guide = nullptr;
     std::vector<Anchor> anchors;
     // Points along horns and claws, out in the air, that slime can hang from.
     std::vector<std::pair<Vec3, float>> perches;
@@ -99,10 +100,13 @@ struct Context {
         if (f.fusion > 0.0f && radius > 0.0f) anchors.push_back({at, normal, radius, height * f.fusion, hollow});
     }
 
+    // May anything grow on vertex v? Not where a bare mask lies.
+    bool allowed(uint32_t v) const { return !guide || guide->bareAt(v) < 0.5f; }
+
     std::vector<uint32_t> candidates(const std::function<bool(uint32_t)>& accept) const {
         std::vector<uint32_t> out;
         for (uint32_t v : shuffled)
-            if (accept(v)) out.push_back(v);
+            if (allowed(v) && accept(v)) out.push_back(v);
         return out;
     }
 };
@@ -131,6 +135,7 @@ void growVeinTubes(Context& c, const VeinNetwork& veins, Mesh& out, GrowthStats&
         std::vector<CorruptionAttributes> attrs;
         for (size_t i = 0; i < path.points.size(); ++i) {
             if (c.cleared(path.points[i])) break;  // ordered toward the seed: the rest is inside the heart
+            if (!c.allowed(path.vertices[i])) break;
             float r = path.radius[i] * 1.3f;
             // Raised roots, mostly proud of the tissue they run over.
             pts.push_back(path.points[i] + path.normals[i] * (r * 0.55f));
@@ -276,7 +281,7 @@ void growTendrils(Context& c, Rng& rng, Mesh& out, GrowthStats& stats) {
             v = static_cast<uint32_t>(w);
             const Vec3& nw = S.normals[v];
             p = ahead - nw * dot(ahead - S.positions[v], nw);  // back onto the surface
-            if (c.infection(v) < 0.15f) break;                 // stay within the corruption
+            if (c.infection(v) < 0.15f || !c.allowed(v)) break;  // stay within the corruption
             if (c.spread.distance[v] < c.params.coreRadius || c.cleared(p)) break;  // arrived at the heart
         }
         if (ground.size() < 4) continue;
@@ -324,7 +329,7 @@ void growTendrils(Context& c, Rng& rng, Mesh& out, GrowthStats& stats) {
                 const uint32_t u = static_cast<uint32_t>(w);
                 const Vec3& nu = S.normals[u];
                 q = ahead - nu * dot(ahead - S.positions[u], nu);
-                if (c.infection(u) < 0.15f || c.cleared(q)) break;
+                if (c.infection(u) < 0.15f || c.cleared(q) || !c.allowed(u)) break;
                 dir -= nu * dot(dir, nu);
                 if (length(dir) < 1e-6f) break;
                 dir = normalize(dir);
@@ -386,6 +391,7 @@ void growHearts(Context& c, Rng& rng, Mesh& out, GrowthStats& stats) {
     const bool maw = heartIsMaw(c);
     Noise lumps(c.params.seed * 733u + 41u);
     for (uint32_t s : heartSeeds(c)) {
+        if (!c.allowed(s)) continue;
         const Vec3& n = S.normals[s];
         const Vec3& p = S.positions[s];
         const float R = heartRadius(c, s);
@@ -520,7 +526,7 @@ void growVertebrae(Context& c, const VeinNetwork& veins, Mesh& out, GrowthStats&
             if (walked < next) continue;
             next = walked + spacing;
             uint32_t v = path.vertices[i];
-            if (c.infection(v) < 0.5f || c.cleared(path.points[i])) continue;
+            if (c.infection(v) < 0.5f || c.cleared(path.points[i]) || !c.allowed(v)) continue;
             const Vec3& n = path.normals[i];
             Vec3 along = path.points[i + 1] - path.points[i - 1];
             along -= n * dot(along, n);
@@ -649,7 +655,7 @@ int32_t bridgePartner(const Context& c, uint32_t a, const std::vector<uint8_t>& 
     int32_t best = -1;
     float bestScore = -1e9f;
     for (uint32_t b : c.grid.within(S.positions[a], maxGap)) {
-        if (used[b] || c.infection(b) < 0.3f) continue;
+        if (used[b] || c.infection(b) < 0.3f || !c.allowed(b)) continue;
         Vec3 d = S.positions[b] - S.positions[a];
         float len = length(d);
         if (len < minGap) continue;
@@ -689,6 +695,7 @@ void growMembrane(Context& c, Rng& rng, uint32_t a, uint32_t b, float sagA, cons
     int32_t b2 = c.grid.nearest(S.positions[b] + side * width, width * 0.6f);
     if (a2 < 0 || b2 < 0 || a2 == static_cast<int32_t>(a) || b2 == static_cast<int32_t>(b)) return;
     if (used[a2] || used[b2] || c.infection(a2) < 0.3f || c.infection(b2) < 0.3f) return;
+    if (!c.allowed(static_cast<uint32_t>(a2)) || !c.allowed(static_cast<uint32_t>(b2))) return;
     Vec3 span2 = S.positions[b2] - S.positions[a2];
     float len2 = length(span2);
     if (len2 < 1e-3f || dot(S.normals[a2], span2 / len2) < 0.3f || dot(S.normals[b2], -span2 / len2) < 0.3f) return;
@@ -825,7 +832,7 @@ void growSlime(Context& c, Rng& rng, GrowthStats& stats) {
             Vec3 d = at - S.positions[u];
             float len = length(d);
             if (len < thickness * 2.0f || len > 0.15f * k || dot(S.normals[u], d) <= 0.0f) continue;
-            if (c.infection(u) < 0.3f) continue;
+            if (c.infection(u) < 0.3f || !c.allowed(u)) continue;
             if (appendSlime(c, u, at, S.positions[u], len * rng.range(0.15f, 0.4f), r * rng.range(0.7f, 1.4f)))
                 ++stats.slime;
         }
@@ -893,7 +900,7 @@ void growSacs(Context& c, Rng& rng, GrowthStats& stats) {
             if (w < 0) continue;
             const uint32_t u = static_cast<uint32_t>(w);
             const Vec3& nu = S.normals[u];
-            if (dot(nu, n) < 0.5f || c.infection(u) < 0.4f || c.cleared(S.positions[u])) continue;
+            if (dot(nu, n) < 0.5f || c.infection(u) < 0.4f || c.cleared(S.positions[u]) || !c.allowed(u)) continue;
             float r = c.f.sacRadius * k * rng.range(0.55f, 1.25f) * (j == 0 ? 1.2f : 1.0f);
             Vec3 ax = t - nu * dot(t, nu);
             ax = length(ax) > 1e-6f ? normalize(ax) : anyPerpendicular(nu);
@@ -940,7 +947,7 @@ SurfaceWalk walkSurface(const Context& c, uint32_t start, Vec3 dir, float length
         if (next < 0) break;
         v = static_cast<uint32_t>(next);
         p = ahead - S.normals[v] * dot(ahead - S.positions[v], S.normals[v]);
-        if (c.infection(v) < 0.3f) break;
+        if (c.infection(v) < 0.3f || !c.allowed(v)) break;
     }
     return w;
 }
@@ -1111,7 +1118,7 @@ void growPods(Context& c, Rng& rng, Mesh& out, GrowthStats& stats) {
                 at = S.positions[static_cast<uint32_t>(w)];
             }
             int32_t near = c.grid.nearest(at, 0.05f * k);
-            if (near < 0) continue;
+            if (near < 0 || !c.allowed(static_cast<uint32_t>(near))) continue;
             const uint32_t u = static_cast<uint32_t>(near);
             const Vec3& n = S.normals[u];
             // Standing up from floors, leaning out from walls.
@@ -1170,7 +1177,7 @@ void growShelves(Context& c, Rng& rng, Mesh& out, GrowthStats& stats) {
         int grown = 0;
         for (int i = 0; i < count; ++i) {
             int32_t near = c.grid.nearest(at, 0.05f * k);
-            if (near < 0) break;
+            if (near < 0 || !c.allowed(static_cast<uint32_t>(near))) break;
             const uint32_t u = static_cast<uint32_t>(near);
             const Vec3 n = S.normals[u];
             if (std::fabs(n.y) > 0.5f) break;
@@ -1222,7 +1229,7 @@ void growShelves(Context& c, Rng& rng, Mesh& out, GrowthStats& stats) {
 // Swells the surface up around each growth's base, so that growths rise out
 // of the tissue instead of sitting on it. Overlapping swellings merge by
 // taking the higher, not the sum, so clusters do not tower.
-void applyFusion(Mesh& S, const std::vector<Anchor>& anchors, const PointGrid& grid) {
+void applyFusion(Mesh& S, const std::vector<Anchor>& anchors, const PointGrid& grid, const GrowthGuide* guide) {
     if (anchors.empty()) return;
     std::vector<float> lift(S.vertexCount(), 0.0f), weight(S.vertexCount(), 0.0f);
     for (const auto& a : anchors) {
@@ -1248,6 +1255,7 @@ void applyFusion(Mesh& S, const std::vector<Anchor>& anchors, const PointGrid& g
     }
     bool moved = false;
     for (uint32_t v = 0; v < S.vertexCount(); ++v) {
+        if (guide && guide->blockAt(v) > 0.5f) continue;  // blocked tissue stays clean
         if (lift[v] <= 0.0f) continue;
         moved = true;
         S.positions[v] += S.normals[v] * lift[v];
@@ -1272,8 +1280,8 @@ bool InsideTest::inside(const Vec3& p) const {
 }
 
 Growth grow(const Mesh& host, const std::vector<Vec3>& seeds, const GrowthParams& params,
-            const FeatureParams& features) {
-    SurfaceGrowth base = growSurface(host, seeds, params);
+            const FeatureParams& features, const GrowthGuide* guide) {
+    SurfaceGrowth base = growSurface(host, seeds, params, guide);
     Growth g;
     g.surface = std::move(base.surface);
     g.spread = std::move(base.spread);
@@ -1284,6 +1292,7 @@ Growth grow(const Mesh& host, const std::vector<Vec3>& seeds, const GrowthParams
     const Mesh& S = g.surface;
     Context c(S, g.spread, g.plates, params, features);
     c.fleshOut = &g.flesh;
+    c.guide = guide;
     VertexGraph graph = VertexGraph::build(S);
     c.curvature = vertexCurvature(S, graph);
     c.grain.resize(S.vertexCount());
@@ -1323,7 +1332,7 @@ Growth grow(const Mesh& host, const std::vector<Vec3>& seeds, const GrowthParams
     growBridges(c, bridgeRng, g.growths, g.stats);
     if (features.sacs) growSacs(c, sacRng, g.stats);
     if (features.slime) growSlime(c, slimeRng, g.stats);
-    applyFusion(g.surface, c.anchors, c.grid);
+    applyFusion(g.surface, c.anchors, c.grid, guide);
     return g;
 }
 

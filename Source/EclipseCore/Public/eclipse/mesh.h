@@ -52,6 +52,9 @@ struct VertexGraph {
     // can turn in 16 directions instead of 4 on a grid-like mesh, which
     // removes the axis-aligned "circuit board" look from spread and veins.
     ECLIPSECORE_API VertexGraph twoRing() const;
+    // The same graph with extra undirected edges, e.g. between separate
+    // meshes that touch.
+    ECLIPSECORE_API VertexGraph withLinks(const std::vector<std::array<uint32_t, 2>>& links) const;
     size_t degree(uint32_t v) const { return offsets[v + 1] - offsets[v]; }
 };
 

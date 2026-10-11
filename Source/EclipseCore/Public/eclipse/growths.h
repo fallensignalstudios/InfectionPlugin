@@ -133,8 +133,10 @@ struct Growth {
     GrowthStats stats;
 };
 
+// With a guide, the spread crosses its links and follows its masks, and
+// nothing grows where it marks the tissue bare (see eclipse/scene.h).
 ECLIPSECORE_API Growth grow(const Mesh& host, const std::vector<Vec3>& seeds, const GrowthParams& params,
-            const FeatureParams& features);
+            const FeatureParams& features, const GrowthGuide* guide = nullptr);
 
 // Is p inside the closed surface, judged from the nearest vertex's normal?
 // Cheap and good enough to keep growths from passing through a body.

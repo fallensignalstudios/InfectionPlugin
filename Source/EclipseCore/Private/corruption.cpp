@@ -89,7 +89,7 @@ uint32_t nearestVertex(const Mesh& mesh, const Vec3& p) {
 }
 
 SpreadField computeSpread(const Mesh& host, const VertexGraph& graph, const std::vector<Vec3>& seeds,
-                          const GrowthParams& params) {
+                          const GrowthParams& params, const GrowthGuide* guide) {
     const size_t n = host.positions.size();
     SpreadField field;
     if (n == 0) return field;
@@ -114,7 +114,16 @@ SpreadField computeSpread(const Mesh& host, const VertexGraph& graph, const std:
         float len = length(e);
         if (len <= 0.0f) return 0.0f;
         float climb = std::max(0.25f, 1.0f - params.gravity * (e.y / len));
-        return len * climb * 0.5f * (resistance[a] + resistance[b]);
+        float c = len * climb * 0.5f * (resistance[a] + resistance[b]);
+        if (guide) {
+            // Blocked tissue is a wall; partly blocked, a slog. Dense tissue
+            // draws the corruption in.
+            float block = std::max(guide->blockAt(a), guide->blockAt(b));
+            if (block >= 0.999f) return -1.0f;
+            c /= (1.0f - block) * (1.0f - block);
+            c *= 1.0f - 0.6f * 0.5f * (guide->denseAt(a) + guide->denseAt(b));
+        }
+        return c;
     };
     Propagation p = propagate(graph.twoRing(), n, sources, cost);
     field.distance = std::move(p.distance);
@@ -146,7 +155,8 @@ SpreadField computeSpread(const Mesh& host, const VertexGraph& graph, const std:
     const float width = std::max(1e-6f, params.frontWidth * field.threshold);
     if (field.threshold > 0.0f)
         for (size_t v = 0; v < n; ++v)
-            field.infection[v] = smoothstep(field.threshold, field.threshold - width, field.distance[v]);
+            field.infection[v] = smoothstep(field.threshold, field.threshold - width, field.distance[v]) *
+                                 (guide ? 1.0f - guide->blockAt(static_cast<uint32_t>(v)) : 1.0f);
     return field;
 }
 
@@ -391,7 +401,8 @@ PlateLayout computePlates(const Mesh& host, const VertexGraph& graph, const Spre
     return layout;
 }
 
-SurfaceGrowth growSurface(const Mesh& hostIn, const std::vector<Vec3>& seeds, const GrowthParams& params) {
+SurfaceGrowth growSurface(const Mesh& hostIn, const std::vector<Vec3>& seeds, const GrowthParams& params,
+                          const GrowthGuide* guide) {
     SurfaceGrowth result;
     Mesh host = hostIn;
     if (host.normals.size() != host.positions.size()) host.computeNormals();
@@ -399,8 +410,9 @@ SurfaceGrowth growSurface(const Mesh& hostIn, const std::vector<Vec3>& seeds, co
     out = host;
     const size_t n = out.positions.size();
     VertexGraph graph = VertexGraph::build(out);
+    if (guide && !guide->links.empty()) graph = graph.withLinks(guide->links);
 
-    result.spread = computeSpread(out, graph, seeds, params);
+    result.spread = computeSpread(out, graph, seeds, params, guide);
     result.veins = computeVeins(out, result.spread, params);
     result.plates = computePlates(out, graph, result.spread, params);
     const SpreadField& spread = result.spread;
@@ -458,6 +470,16 @@ SurfaceGrowth growSurface(const Mesh& hostIn, const std::vector<Vec3>& seeds, co
         // Veins stain the tissue dark and glow only faintly; light belongs to
         // the cores, the eyes and the seams that leak it.
         a.glow = std::max({vein * (1.0f - 0.85f * armour) * 0.05f, crackLight * 0.6f, core});
+        if (guide) {
+            // Nothing of the corruption shows on blocked tissue, veins included.
+            const float open = 1.0f - guide->blockAt(static_cast<uint32_t>(v));
+            a.infection *= open;
+            a.glow *= open;
+            a.crack *= open;
+            a.flesh *= open;
+            a.tone *= open;
+            height *= open;
+        }
         a.height = height;
         a.arrival = spread.threshold > 0.0f && spread.distance[v] < kInf
                         ? std::min(4.0f, spread.distance[v] / spread.threshold)

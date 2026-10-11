@@ -86,6 +86,23 @@ claws ringed, sacs and orbs lumpy (**roughness**, 0 for smooth).
 | Bridges | Across gaps between surfaces that face each other | Sagging catenary tendrils, thinner in the middle; rejected if they would pass through the host. |
 | Membranes | Some bridges | A sagging, two-sided sheet between two neighbouring bridges, torn through with noise-shaped holes whose rims glow. |
 
+### Rooms, masks and variations
+
+- **One outbreak across many meshes.** Separate pieces that touch (a modular
+  floor, walls and props) grow as one surface: the spread crosses wherever
+  they come within a contact gap (2 cm), and the coverage is a share of them
+  all. `eclipse/scene.h`; in the CLI the built-in `kit` host is the corridor
+  as five separate meshes.
+- **Mask volumes** (boxes or spheres, soft-edged): **Block** keeps the
+  corruption out (walkways, doors, gameplay space), and it routes around;
+  **Bare** lets the surface corrupt but grows nothing on it; **Dense** draws
+  the corruption in first, so it is oldest and most overgrown there. CLI:
+  `--mask block:box:X,Y,Z:HX,HY,HZ[:FALLOFF]`.
+- **Variations**: the same settings with the next seed. CLI `--variations N`
+  previews N side by side.
+
+![Separate meshes grown as one, then with masks](docs/previews/scene_masks.jpg)
+
 ### Formations
 
 Large set pieces, off by default and turned on by the presets below (or one
