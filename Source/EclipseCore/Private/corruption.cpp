@@ -410,6 +410,7 @@ SurfaceGrowth growSurface(const Mesh& hostIn, const std::vector<Vec3>& seeds, co
     Noise swellNoise(params.seed * 13u + 3u);
     Noise knots(params.seed * 101u + 7u);
     Noise glowNoise(params.seed * 53u + 29u);
+    Noise bruiseNoise(params.seed * 211u + 61u);
     out.attributes.assign(n, CorruptionAttributes{});
     for (size_t v = 0; v < n; ++v) {
         auto& a = out.attributes[v];
@@ -450,7 +451,10 @@ SurfaceGrowth growSurface(const Mesh& hostIn, const std::vector<Vec3>& seeds, co
         a.infection = std::max(inf, smoothstep(0.0f, 0.6f, vein));
         a.crack = crack;
         // The tissue under the carapace shows in the seams.
-        a.flesh = crack;
+        a.flesh = 0.6f * crack;
+        // Mottled bruises: patches of a hand's width, darker wine through the black.
+        float bruise = smoothstep(0.52f, 0.78f, 0.5f + 0.5f * bruiseNoise.fbm(p * 7.0f, 3));
+        a.tone = -params.bruising * bruise * inf;
         // Veins stain the tissue dark and glow only faintly; light belongs to
         // the cores, the eyes and the seams that leak it.
         a.glow = std::max({vein * (1.0f - 0.85f * armour) * 0.05f, crackLight * 0.6f, core});
@@ -468,11 +472,14 @@ Mesh corrupt(const Mesh& host, const std::vector<Vec3>& seeds, const GrowthParam
     return growSurface(host, seeds, params).surface;
 }
 
-Mesh extractShell(const Mesh& surface, float offset, std::vector<uint32_t>* sourceVertex) {
+Mesh extractShell(const Mesh& surface, float offset, std::vector<uint32_t>* sourceVertex, float haloReach) {
     Mesh shell;
     if (sourceVertex) sourceVertex->clear();
     if (surface.attributes.size() != surface.positions.size()) return shell;
-    auto touched = [&](uint32_t v) { return surface.attributes[v].infection > 0.0f || surface.attributes[v].glow > 0.0f; };
+    auto touched = [&](uint32_t v) {
+        const auto& a = surface.attributes[v];
+        return a.infection > 0.0f || a.glow > 0.0f || (haloReach > 0.0f && a.arrival < 1.0f + haloReach);
+    };
     std::vector<int32_t> remap(surface.positions.size(), -1);
     for (const auto& t : surface.triangles) {
         if (!touched(t[0]) && !touched(t[1]) && !touched(t[2])) continue;

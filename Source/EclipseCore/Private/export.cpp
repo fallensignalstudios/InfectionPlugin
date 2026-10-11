@@ -1,5 +1,6 @@
 #include "eclipse/export.h"
 
+#include <algorithm>
 #include <fstream>
 #include <cstring>
 #include <sstream>
@@ -109,7 +110,7 @@ bool writeGlb(const std::string& path, const std::vector<NamedMesh>& meshes, std
             s = beginView();
             for (const auto& a : mesh.attributes) {
                 appendF32(bin, clamp01(a.flesh));
-                appendF32(bin, 0.0f);
+                appendF32(bin, std::max(-1.0f, std::min(1.0f, a.tone)));
             }
             attributes << ",\"TEXCOORD_1\":" << addAccessor(endView(s, false), 5126, n, "VEC2", "");
         }

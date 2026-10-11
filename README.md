@@ -81,6 +81,7 @@ claws ringed, sacs and orbs lumpy (**roughness**, 0 for smooth).
 | Horns | Oldest tissue, near the cores | Scythes swept along the growth: most modest, a rare few several times longer. Uneven growth rings like real horn; the big ones carry small hooked barbs. |
 | Eyes and sacs | Flatter hollows inside plates | Half-buried ellipsoids in swollen sockets: eyes with a bright pupil ringed by a dark lid, or sacs faintly lit toward the crown. |
 | Sac clusters | Folds and corners | Packed clusters of translucent pods, a few lit faintly from within. |
+| Slime | Under horns and claws; across tight creases | Thin beaded strings of mucus, sagging, with a drop gathering at the lowest point. |
 | Hanging strands | Undersides and overhangs | Gravity-drooping, swaying tubes ending in a drip; some glow. A strand stops where it would sink back into the host. |
 | Bridges | Across gaps between surfaces that face each other | Sagging catenary tendrils, thinner in the middle; rejected if they would pass through the host. |
 | Membranes | Some bridges | A sagging, two-sided sheet between two neighbouring bridges, torn through with noise-shaped holes whose rims glow. |
@@ -119,6 +120,12 @@ separately. All carry the data the Eclipse materials read:
 | `TEXCOORD_0.x` | arrival: 0 at the seed, 1 at the current front, up to 4 beyond it. Animating a threshold over it replays the growth in the material. |
 | `TEXCOORD_0.y` | height the surface was raised, in metres (0 on growths) |
 | `TEXCOORD_1.x` | soft tissue: 1 on the flesh mesh; on the surface, the raw tissue showing in seams and around growths |
+| `TEXCOORD_1.y` | tone, -1..1: below 0 bruised (dark wine patches through the carapace), above 0 bone (horn, claw and tooth tips paling) |
+
+Past the front, `TEXCOORD_0.x` (arrival) also drives the **halo**: clean tissue
+up to `haloReach` beyond the front darkens and grows fine capillaries, so the
+corruption fades in rather than starting at a hard edge. Overlay shells are
+extended that far to carry it.
 
 On growths, infection is always 1 and arrival is that of the tissue under them
 plus a little, so in a growth animation they emerge just after their ground turns.

@@ -64,6 +64,18 @@ public:
 	UPROPERTY(EditAnywhere, Config, Category = "Veins", meta = (ClampMin = "1", ClampMax = "500"))
 	float VeinThreshold = 40.0f;
 
+	// --- Colour -------------------------------------------------------------
+
+	// How much of the tissue is mottled with dark bruises.
+	UPROPERTY(EditAnywhere, Config, Category = "Colour", meta = (ClampMin = "0", ClampMax = "1"))
+	float Bruising = 0.5f;
+
+	// How far past the front, as a share of its reach, clean tissue shows the
+	// infection coming: a darkening wash and capillaries. The overlay shell
+	// is extended this far to carry it; 0 turns it off.
+	UPROPERTY(EditAnywhere, Config, Category = "Colour", meta = (ClampMin = "0", ClampMax = "1"))
+	float HaloReach = 0.35f;
+
 	// --- Carapace -----------------------------------------------------------
 
 	UPROPERTY(EditAnywhere, Config, Category = "Carapace", meta = (ClampMin = "1", ClampMax = "100", Units = "cm"))
@@ -167,6 +179,13 @@ public:
 	UPROPERTY(EditAnywhere, Config, Category = "Growths", meta = (ClampMin = "0", ClampMax = "0.9", EditCondition = "bGrowths"))
 	float MembraneHoles = 0.35f;
 
+	// Thin beaded strings of mucus from horns and claws, and across creases.
+	UPROPERTY(EditAnywhere, Config, Category = "Growths", meta = (EditCondition = "bGrowths"))
+	bool bSlime = true;
+
+	UPROPERTY(EditAnywhere, Config, Category = "Growths", meta = (ClampMin = "0", ClampMax = "1", EditCondition = "bGrowths && bSlime"))
+	float SlimeChance = 0.5f;
+
 	// --- Mesh ---------------------------------------------------------------
 
 	// The host is subdivided until no edge is longer than this. Corruption
@@ -189,4 +208,14 @@ public:
 
 	UPROPERTY(EditAnywhere, Config, Category = "Output")
 	bool bEnableNanite = true;
+
+	// Push the carapace detail out into the silhouette with Nanite
+	// tessellation. Needs Nanite outputs and, in the project's
+	// DefaultEngine.ini, r.Nanite.AllowTessellation=1 and
+	// r.Nanite.Tessellation=1 (restart). Applied by Rebuild Materials.
+	UPROPERTY(EditAnywhere, Config, Category = "Output", meta = (EditCondition = "bEnableNanite"))
+	bool bNaniteDisplacement = false;
+
+	UPROPERTY(EditAnywhere, Config, Category = "Output", meta = (ClampMin = "0", ClampMax = "5", Units = "cm", EditCondition = "bEnableNanite && bNaniteDisplacement"))
+	float DisplacementDepth = 0.8f;
 };

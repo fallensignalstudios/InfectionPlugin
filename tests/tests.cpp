@@ -575,7 +575,8 @@ TEST(styled_tubes_resample_once_when_the_detail_budget_is_exhausted) {
         const Vec3& n = tube.normals[i];
         finite = finite && std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z) &&
                  std::isfinite(n.x) && std::isfinite(n.y) && std::isfinite(n.z);
-        carriesAttributes = carriesAttributes && (tube.attributes[i].infection == 1.0f || tube.attributes[i].infection == 0.5f);
+        // Attributes are interpolated along the tube (so tone gradients stay smooth).
+        carriesAttributes = carriesAttributes && tube.attributes[i].infection >= 0.5f && tube.attributes[i].infection <= 1.0f;
     }
     CHECK(finite && carriesAttributes);
 }
@@ -650,7 +651,7 @@ TEST(growths_stay_near_the_corruption) {
 }
 
 TEST(detail_maps_tile_seamlessly) {
-    for (DetailKind kind : {DetailKind::Chitin, DetailKind::Flesh}) {
+    for (DetailKind kind : {DetailKind::Chitin, DetailKind::Flesh, DetailKind::Capillaries}) {
         const int n = 128;
         DetailMap m = makeDetailMap(kind, n);
         CHECK(m.size == n);
@@ -681,6 +682,65 @@ TEST(detail_maps_tile_seamlessly) {
         CHECK(std::fabs(slope / (n * n) - 127.5) < 6.0);
         CHECK(spread / (n * n) > 10.0);
     }
+}
+
+TEST(colour_varies_with_bruises_and_bone_tips) {
+    const Growth& g = grownMannequin();
+    size_t bruised = 0, infected = 0;
+    bool clean = true;
+    for (const auto& a : g.surface.attributes) {
+        if (a.infection > 0.9f) ++infected;
+        if (a.tone < -0.05f) ++bruised;
+        clean = clean && (a.infection > 0.0f || a.tone == 0.0f);  // clean tissue is never bruised
+    }
+    CHECK(clean);
+    CHECK(bruised > infected / 20 && bruised < infected * 3 / 4);  // patches, not everywhere
+    // Horns and claws pale toward their tips; nothing in the hard growths is bruised.
+    size_t pale = 0;
+    bool range = true;
+    for (const auto& a : g.growths.attributes) {
+        if (a.tone > 0.5f) ++pale;
+        range = range && a.tone >= 0.0f && a.tone <= 1.0f;
+    }
+    CHECK(pale > 100);
+    CHECK(range);
+}
+
+TEST(shell_carries_the_halo_past_the_front) {
+    GrowthParams p;
+    p.coverage = 0.4f;
+    FeatureParams none;
+    none.enabled = false;
+    Growth g = grow(mannequin().mesh, mannequin().defaultSeeds, p, none);
+    Mesh tight = extractShell(g.surface, 0.0015f);
+    std::vector<uint32_t> sources;
+    Mesh haloed = extractShell(g.surface, 0.0015f, &sources, p.haloReach);
+    CHECK(haloed.vertexCount() > tight.vertexCount());
+    CHECK(sources.size() == haloed.vertexCount());
+    // Every triangle touches the corruption or tissue within the halo's reach.
+    bool within = true;
+    for (const auto& t : haloed.triangles) {
+        bool touches = false;
+        for (uint32_t i : t) {
+            const auto& a = haloed.attributes[i];
+            touches = touches || a.infection > 0.0f || a.glow > 0.0f || a.arrival < 1.0f + p.haloReach;
+        }
+        within = within && touches;
+    }
+    CHECK(within);
+}
+
+TEST(slime_hangs_wet_and_clear_of_the_host) {
+    const Growth& g = grownMannequin();
+    CHECK(g.stats.slime > 10);
+    FeatureParams dry;
+    dry.slime = false;
+    GrowthParams p;
+    p.coverage = 0.85f;
+    Growth without = grow(mannequin().mesh, mannequin().defaultSeeds, p, dry);
+    // Slime lives in the soft-tissue mesh and changes nothing else.
+    CHECK(g.flesh.vertexCount() > without.flesh.vertexCount());
+    CHECK(meshHash(g.growths) == meshHash(without.growths));
 }
 
 TEST(soft_tissue_is_its_own_mesh) {

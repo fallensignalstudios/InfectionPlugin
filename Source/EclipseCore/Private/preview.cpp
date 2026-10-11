@@ -5,6 +5,8 @@
 #include <fstream>
 #include <limits>
 
+#include "eclipse/detail.h"
+
 namespace eclipse {
 
 namespace {
@@ -19,7 +21,25 @@ struct Light {
     Vec3 key, fill;
 };
 
-Vec3 shade(const Vec3& normal, const Vec3& toEye, const CorruptionAttributes& a, const Light& light) {
+// Fine capillaries for the halo ahead of the front: the material's
+// capillary map, tiled triplanar every 8 cm, denser close to the front.
+float capillaries(const Vec3& p, const Vec3& n, float halo) {
+    static const DetailMap map = makeDetailMap(DetailKind::Capillaries, 256);
+    auto sample = [&](float u, float v) {
+        int x = static_cast<int>(std::floor(u * map.size)) % map.size, y = static_cast<int>(std::floor(v * map.size)) % map.size;
+        if (x < 0) x += map.size;
+        if (y < 0) y += map.size;
+        return map.rgba[(static_cast<size_t>(y) * map.size + x) * 4 + 2] / 255.0f;
+    };
+    const Vec3 q = p / 0.08f;
+    Vec3 w{std::pow(std::fabs(n.x), 4.0f), std::pow(std::fabs(n.y), 4.0f), std::pow(std::fabs(n.z), 4.0f)};
+    float sum = w.x + w.y + w.z;
+    float vessel = (sample(q.y, q.z) * w.x + sample(q.x, q.z) * w.y + sample(q.x, q.y) * w.z) / std::max(sum, 1e-6f);
+    float lo = 0.95f - 0.3f * halo;
+    return smoothstep(lo, lo + 0.06f, vessel);
+}
+
+Vec3 shade(const Vec3& normal, const Vec3& toEye, const Vec3& position, const CorruptionAttributes& a, const Light& light) {
     Vec3 n = normalize(normal);
     if (dot(n, toEye) < 0.0f) n = -n;  // two-sided, for open environment shells
     const float s = smoothstep(0.0f, 1.0f, a.infection);
@@ -29,12 +49,26 @@ Vec3 shade(const Vec3& normal, const Vec3& toEye, const CorruptionAttributes& a,
     Vec3 carapace = Vec3{0.018f, 0.015f, 0.022f} + Vec3{0.02f, 0.008f, 0.03f} * a.plateTint;
     Vec3 base = lerp(skin, carapace, s);
     base = lerp(base, Vec3{0.12f, 0.05f, 0.10f}, 0.45f * inflamed * (1.0f - s));
+    // Bruised patches through the carapace; pale, bony tips on horns.
+    const float bruise = clamp01(-a.tone), bone = clamp01(a.tone);
+    base = lerp(base, Vec3{0.05f, 0.008f, 0.028f}, 0.85f * bruise * s);
+    base = lerp(base, Vec3{0.33f, 0.29f, 0.32f}, bone);
+    // The halo on clean tissue just ahead of the front: darkening skin and
+    // capillaries reaching out.
+    // Measured from a little behind the front, through its soft edge, so
+    // the halo meets the corruption with no clean gap.
+    const float ahead = a.arrival - 0.85f;
+    if (ahead > 0.0f && s < 1.0f) {
+        float halo = (1.0f - smoothstep(0.0f, 0.5f, ahead)) * (1.0f - s);
+        base = lerp(base, Vec3{0.24f, 0.15f, 0.19f}, 0.7f * halo);
+        base = lerp(base, Vec3{0.07f, 0.015f, 0.05f}, capillaries(position, n, halo) * std::sqrt(halo));
+    }
 
     float ambient = lerpf(0.20f, 0.36f, n.y * 0.5f + 0.5f);
     float diffuse = std::max(0.0f, dot(n, light.key)) * 0.9f + std::max(0.0f, dot(n, light.fill)) * 0.25f;
     Vec3 colour = base * (ambient + diffuse);
 
-    float gloss = lerpf(0.03f, 0.85f, s);
+    float gloss = lerpf(0.03f, 0.85f, s) * (1.0f - 0.5f * bone);
     float exponent = lerpf(12.0f, 140.0f, s);
     Vec3 h = normalize(light.key + toEye);
     float spec = gloss * std::pow(std::max(0.0f, dot(n, h)), exponent) * (exponent + 8.0f) / 40.0f;
@@ -120,9 +154,11 @@ void renderView(const Mesh& mesh, const Camera& cam, const Light& light, int W, 
                     a.glow = a0.glow * b0 + a1.glow * b1 + a2.glow * b2;
                     a.crack = a0.crack * b0 + a1.crack * b1 + a2.crack * b2;
                     a.plateTint = a0.plateTint * b0 + a1.plateTint * b1 + a2.plateTint * b2;
+                    a.arrival = a0.arrival * b0 + a1.arrival * b1 + a2.arrival * b2;
                     a.flesh = a0.flesh * b0 + a1.flesh * b1 + a2.flesh * b2;
+                    a.tone = a0.tone * b0 + a1.tone * b1 + a2.tone * b2;
                 }
-                colour[pix] = shade(nrm, normalize(cam.eye - pos), a, light);
+                colour[pix] = shade(nrm, normalize(cam.eye - pos), pos, a, light);
             }
     }
 }

@@ -111,6 +111,22 @@ float fleshHeight(const Tileable& t, float u, float v) {
     return 0.45f * swell + 0.5f * folds + 0.15f * wrinkles + 0.25f * veinlets - 0.06f * pore;
 }
 
+// A web of fine vessels along the edges of warped cells, which branch and
+// join like a capillary bed. The main vessels reach full height and their
+// finer branches 0.8, so a rising threshold leaves only the main ones.
+float capillaryHeight(const Tileable& t, float u, float v) {
+    float wu = u + 0.05f * t.fbm(u, v, 4, 3), wv = v + 0.05f * t.fbm(u + 0.4f, v + 0.2f, 4, 3);
+    float f1, f2;
+    t.cells(wu, wv, 6, f1, f2);
+    float main = 1.0f - smoothstep(0.0f, 0.12f, f2 - f1);
+    t.cells(wu + 0.013f, wv + 0.029f, 17, f1, f2);
+    float fine = 1.0f - smoothstep(0.0f, 0.14f, f2 - f1);
+    // Gaps, so vessels end and branch instead of closing into cells.
+    main *= smoothstep(-0.35f, 0.0f, t.fbm(u, v, 4, 2));
+    fine *= smoothstep(-0.05f, 0.25f, t.fbm(u + 0.7f, v + 0.1f, 7, 2));
+    return std::max(main, 0.8f * fine);
+}
+
 }  // namespace
 
 DetailMap makeDetailMap(DetailKind kind, int size, uint32_t seed) {
@@ -118,13 +134,15 @@ DetailMap makeDetailMap(DetailKind kind, int size, uint32_t seed) {
     if (size < 8) return map;
     map.size = size;
     const size_t n = static_cast<size_t>(size) * static_cast<size_t>(size);
-    Tileable t(seed * 2246822519u + (kind == DetailKind::Chitin ? 11u : 23u));
+    Tileable t(seed * 2246822519u + 11u + 12u * static_cast<uint32_t>(kind));
     std::vector<float> h(n);
     for (int y = 0; y < size; ++y)
         for (int x = 0; x < size; ++x) {
             float u = (static_cast<float>(x) + 0.5f) / static_cast<float>(size);
             float v = (static_cast<float>(y) + 0.5f) / static_cast<float>(size);
-            h[static_cast<size_t>(y) * size + x] = kind == DetailKind::Chitin ? chitinHeight(t, u, v) : fleshHeight(t, u, v);
+            h[static_cast<size_t>(y) * size + x] = kind == DetailKind::Chitin ? chitinHeight(t, u, v)
+                                                   : kind == DetailKind::Flesh  ? fleshHeight(t, u, v)
+                                                                                : capillaryHeight(t, u, v);
         }
     auto [lo, hi] = std::minmax_element(h.begin(), h.end());
     const float low = *lo, range = std::max(1e-6f, *hi - *lo);

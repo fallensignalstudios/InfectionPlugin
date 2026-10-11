@@ -10,6 +10,8 @@
 #include "Materials/MaterialExpressionCameraVectorWS.h"
 #include "Materials/MaterialExpressionCustom.h"
 #include "Materials/MaterialExpressionDistance.h"
+#include "Materials/MaterialExpressionDitherTemporalAA.h"
+#include "Materials/MaterialExpressionLocalPosition.h"
 #include "Materials/MaterialExpressionPreSkinnedNormal.h"
 #include "Materials/MaterialExpressionPreSkinnedPosition.h"
 #include "Materials/MaterialExpressionScalarParameter.h"
@@ -36,6 +38,7 @@ namespace
 	const TCHAR* FleshName = TEXT("M_EclipseFlesh");
 	const TCHAR* ChitinTextureName = TEXT("T_EclipseChitin");
 	const TCHAR* FleshTextureName = TEXT("T_EclipseFlesh");
+	const TCHAR* CapillaryTextureName = TEXT("T_EclipseCapillaries");
 	constexpr int32 DetailSize = 512;
 
 	// Shared by every node: how far the growth has played (reveal) and how
@@ -105,7 +108,31 @@ namespace
 		"float3 c = lerp(host, InflamedColor, 0.45 * inflamed * (1.0 - s));\n"
 		"float3 shell = lerp(CarapaceColor + CarapaceTint * VA, FleshColor, fleshy);\n"
 		"c = lerp(c, shell, s);\n"
+		"float bruise = saturate(-UV1.y), bone = saturate(UV1.y);\n"
+		"c = lerp(c, BruiseColor, 0.85 * bruise * s);\n"
+		"c = lerp(c, BoneColor, bone * s);\n"
+		"float tint = OverlayMode > 0.5 ? step(0.001, HL.x) * (1.0 - s) : HL.x;\n"
+		"c = lerp(c, HaloColor, tint);\n"
+		"c = lerp(c, VesselColor, HL.y);\n"
 		"return c * lerp(1.0, d.a, CavityStrength * s);\n");
+
+	// The halo on clean tissue ahead of the front: x is how strongly it is
+	// tinted, y the capillaries reaching out, denser near the front. Measured
+	// from a little behind the front so it meets the corruption's soft edge,
+	// and gone by HaloReach past it, where the overlay shell ends.
+	const TCHAR* HaloCode = TEXT(
+		"float3 tn = normalize(NL);\n"
+		"float3 tw = pow(abs(tn), 4.0);\n"
+		"tw /= tw.x + tw.y + tw.z;\n"
+		"float3 vq = PL / max(CapillaryScale, 0.1);\n"
+		"float vessel = Texture2DSample(Capillaries, CapillariesSampler, vq.yz).b * tw.x\n"
+		"             + Texture2DSample(Capillaries, CapillariesSampler, vq.xz).b * tw.y\n"
+		"             + Texture2DSample(Capillaries, CapillariesSampler, vq.xy).b * tw.z;\n"
+		"float ahead = UV.x - (min(Growth, 1.0) - 0.15);\n"
+		"float halo = ahead > 0.0 ? 1.0 - smoothstep(0.0, HaloReach + 0.15, ahead) : 0.0;\n"
+		"halo *= (1.0 - s) * burn * (1.0 - IsGrowth) * saturate(Growth * 10.0);\n"
+		"float lo = 0.95 - 0.3 * halo;\n"
+		"return float2(HaloStrength * halo, smoothstep(lo, lo + 0.06, vessel) * sqrt(halo));\n");
 
 	// The glow pulses in waves travelling outward from the seed. Exposed
 	// tissue adds a faint scattered light, strongest at grazing angles.
@@ -115,21 +142,30 @@ namespace
 		"float3 scatter = ScatterColor * FleshGlow * fleshy * s * (0.3 + rim);\n"
 		"return GlowIntensity * (GlowColor * saturate(VC.g) * reveal * pulse + EmberColor * ember) + scatter;\n");
 
-	const TCHAR* RoughnessCode = TEXT("return lerp(lerp(0.7, 0.22, s), FleshRoughness, fleshy * s);\n");
-	const TCHAR* ClearCoatCode = TEXT("return s * (1.0 - 0.6 * fleshy);\n");
+	const TCHAR* RoughnessCode = TEXT(
+		"float bone = saturate(UV1.y);\n"
+		"return lerp(lerp(lerp(0.7, 0.22, s), FleshRoughness, fleshy * s), 0.42, bone * s);\n");
+	const TCHAR* ClearCoatCode = TEXT("return s * (1.0 - 0.6 * fleshy) * (1.0 - 0.6 * saturate(UV1.y));\n");
 
-	// Overlay shells show only where corrupted or on a vein's bright core;
-	// growths show once revealed; a replacing surface is always solid.
+	// Overlay shells show only where corrupted, on a vein's bright core or in
+	// the halo; growths show once revealed; a replacing surface is always
+	// solid. The result is dithered, so the halo's partial tint reads as a
+	// soft wash over the host under temporal anti-aliasing.
 	const TCHAR* OpacityCode = TEXT(
 		"float visible = saturate(max(VC.r * 2.0, (VC.g - 0.3) * 3.0));\n"
-		"float surfaceOpacity = lerp(1.0, reveal * visible, OverlayMode);\n"
+		"float surfaceOpacity = lerp(1.0, max(reveal * visible, max(HL.x, HL.y)), OverlayMode);\n"
 		"return lerp(surfaceOpacity, reveal, IsGrowth);\n");
+
+	// Height of the carapace detail for Nanite tessellation, in the mesh's
+	// own space; only where the corruption has grown.
+	const TCHAR* DisplacementCode = TEXT("return d.b * s * (1.0 - 0.5 * fleshy);\n");
 
 	// Soft tissue: dark wine flesh, lighter on its swellings and black in its
 	// folds. The dark lid around an eye arrives in the crack channel.
 	const TCHAR* FleshBaseCode = TEXT(
 		"float3 c = lerp(FleshDeep, FleshColor, saturate(0.4 + d.b));\n"
 		"c *= lerp(1.0, d.a, CavityStrength);\n"
+		"c *= 1.0 - 0.5 * saturate(-UV1.y);\n"
 		"return c * (1.0 - 0.85 * saturate(VC.b));\n");
 	const TCHAR* FleshRoughnessCode = TEXT("return FleshRoughness + 0.25 * (1.0 - d.a);\n");
 	const TCHAR* FleshOpacityCode = TEXT("return reveal;\n");
@@ -290,13 +326,28 @@ namespace
 	{
 		UTexture2D* Chitin = nullptr;
 		UTexture2D* Flesh = nullptr;
+		UTexture2D* Capillaries = nullptr;
 	};
+
+	// Sets a float inside a struct UPROPERTY by name, for engine settings
+	// reached through reflection (see EclipseBridge::SetBoolProperty).
+	bool SetStructFloat(UObject* Object, FName StructProperty, FName Field, float Value)
+	{
+		FStructProperty* Outer = FindFProperty<FStructProperty>(Object->GetClass(), StructProperty);
+		FFloatProperty* Inner = Outer ? FindFProperty<FFloatProperty>(Outer->Struct, Field) : nullptr;
+		if (!Inner)
+		{
+			return false;
+		}
+		Inner->SetPropertyValue_InContainer(Outer->ContainerPtrToValuePtr<void>(Object), Value);
+		return true;
+	}
 
 	// Builds a master into Existing (cleared first) or into a new asset. Both
 	// masters share the reveal, burn, glow and detail logic; the carapace one
 	// is clear-coated, the soft-tissue one scatters light through itself.
 	UMaterial* BuildMaster(const FString& Folder, bool bFlesh, UMaterial* Existing, const FDetailTextures& Detail,
-		FText& OutError)
+		const FEclipseMaterialOptions& Options, FText& OutError)
 	{
 		UMaterial* M = CreateOrClear(Folder, bFlesh ? FleshName : BiomassName, Existing, OutError);
 		if (!M)
@@ -416,7 +467,31 @@ namespace
 			auto* CarapaceColor = Colour(M, TEXT("CarapaceColor"), FLinearColor(0.018f, 0.015f, 0.022f), -420);
 			auto* CarapaceTint = Colour(M, TEXT("CarapaceTint"), FLinearColor(0.02f, 0.008f, 0.03f), -280);
 
+			auto* CapillaryMap = TextureObject(M, Detail.Capillaries, -1600);
+			auto* CapillaryScale = Scalar(M, TEXT("CapillaryScale"), 10.0f, 1460, TEXT("Eclipse Halo"));
+			auto* HaloReach = Scalar(M, TEXT("HaloReach"), Options.HaloReach, 1540, TEXT("Eclipse Halo"));
+			auto* HaloStrength = Scalar(M, TEXT("HaloStrength"), 0.6f, 1620, TEXT("Eclipse Halo"));
+			auto* HaloColor = Colour(M, TEXT("HaloColor"), FLinearColor(0.24f, 0.15f, 0.19f), 1460);
+			auto* VesselColor = Colour(M, TEXT("VesselColor"), FLinearColor(0.07f, 0.015f, 0.05f), 1600);
+			auto* BruiseColor = Colour(M, TEXT("BruiseColor"), FLinearColor(0.05f, 0.008f, 0.028f), 1740);
+			auto* BoneColor = Colour(M, TEXT("BoneColor"), FLinearColor(0.33f, 0.29f, 0.32f), 1880);
+
+			FInputs HaloInputs = Common;
+			HaloInputs.Add(TEXT("PL"), LocalPosition);
+			HaloInputs.Add(TEXT("NL"), LocalNormal);
+			HaloInputs.Add(TEXT("Capillaries"), CapillaryMap);
+			HaloInputs.Add(TEXT("CapillaryScale"), CapillaryScale);
+			HaloInputs.Add(TEXT("HaloReach"), HaloReach);
+			HaloInputs.Add(TEXT("HaloStrength"), HaloStrength);
+			HaloInputs.Add(TEXT("IsGrowth"), IsGrowth);
+			auto* HaloNode = Custom(M, TEXT("Eclipse Halo"), HaloCode, CMOT_Float2, HaloInputs, 1000);
+
 			FInputs BaseInputs = DetailInputs;
+			BaseInputs.Add(TEXT("HL"), HaloNode);
+			BaseInputs.Add(TEXT("HaloColor"), HaloColor);
+			BaseInputs.Add(TEXT("VesselColor"), VesselColor);
+			BaseInputs.Add(TEXT("BruiseColor"), BruiseColor);
+			BaseInputs.Add(TEXT("BoneColor"), BoneColor);
 			BaseInputs.Add(TEXT("HostColor"), HostColor);
 			BaseInputs.Add(TEXT("InflamedColor"), InflamedColor);
 			BaseInputs.Add(TEXT("CarapaceColor"), CarapaceColor);
@@ -430,6 +505,7 @@ namespace
 			FInputs OpacityInputs = Common;
 			OpacityInputs.Add(TEXT("OverlayMode"), OverlayMode);
 			OpacityInputs.Add(TEXT("IsGrowth"), IsGrowth);
+			OpacityInputs.Add(TEXT("HL"), HaloNode);
 
 			auto* BaseNode = Custom(M, TEXT("Eclipse Base Colour"), FString(Triplanar) + BaseColorCode, CMOT_Float3, BaseInputs, -600);
 			auto* RoughNode = Custom(M, TEXT("Eclipse Roughness"), RoughnessCode, CMOT_Float1, RoughInputs, -150);
@@ -440,7 +516,41 @@ namespace
 			UMaterialEditingLibrary::ConnectMaterialProperty(RoughNode, TEXT(""), MP_Roughness);
 			UMaterialEditingLibrary::ConnectMaterialProperty(CoatNode, TEXT(""), MP_CustomData0);       // clear coat
 			UMaterialEditingLibrary::ConnectMaterialProperty(CoatRoughness, TEXT(""), MP_CustomData1);  // clear coat roughness
-			UMaterialEditingLibrary::ConnectMaterialProperty(OpacityNode, TEXT(""), MP_OpacityMask);
+			auto* Dither = Cast<UMaterialExpressionDitherTemporalAA>(
+				UMaterialEditingLibrary::CreateMaterialExpression(M, UMaterialExpressionDitherTemporalAA::StaticClass(), 0, 150));
+			Dither->AlphaThreshold.Expression = OpacityNode;
+			UMaterialEditingLibrary::ConnectMaterialProperty(Dither, TEXT(""), MP_OpacityMask);
+
+			if (Options.bDisplacement)
+			{
+				// Evaluated where Nanite tessellates, so straight from the
+				// local position rather than through a vertex interpolator.
+				FInputs DisplacementInputs = DetailInputs;
+				auto* Local = UMaterialEditingLibrary::CreateMaterialExpression(M, UMaterialExpressionLocalPosition::StaticClass(), -1500, 2000);
+				for (auto& Input : DisplacementInputs.List)
+				{
+					if (Input.Key == TEXT("PL"))
+					{
+						Input.Value = MakeTuple(Local, FString());
+					}
+					else if (Input.Key == TEXT("NL"))
+					{
+						Input.Value = MakeTuple(static_cast<UMaterialExpression*>(VertexNormal), FString());
+					}
+				}
+				auto* DisplacementNode = Custom(M, TEXT("Eclipse Displacement"), FString(Triplanar) + DisplacementCode,
+					CMOT_Float1, DisplacementInputs, 2000);
+				UMaterialEditingLibrary::ConnectMaterialProperty(DisplacementNode, TEXT(""), MP_Displacement);
+				const bool bTessellation = EclipseBridge::SetBoolProperty(M, TEXT("bEnableTessellation"), true);
+				const bool bScaled = SetStructFloat(M, TEXT("DisplacementScaling"), TEXT("Magnitude"), Options.DisplacementDepth) &&
+									 SetStructFloat(M, TEXT("DisplacementScaling"), TEXT("Center"), 0.0f);
+				if (!bTessellation || !bScaled)
+				{
+					UE_LOG(LogTemp, Warning,
+						TEXT("Eclipse: could not enable tessellation on %s by property name; enable it in the material's Nanite settings."),
+						*M->GetName());
+				}
+			}
 		}
 		else
 		{
@@ -505,13 +615,19 @@ namespace
 	}
 }
 
-bool FEclipseMaterials::Ensure(const FString& OutputFolder, bool bRebuild, FEclipseMaterials& Out, FText& OutError)
+bool FEclipseMaterials::Ensure(const FString& OutputFolder, bool bRebuild, FEclipseMaterials& Out, FText& OutError,
+	const FEclipseMaterialOptions& Options)
 {
 	const FString Folder = OutputFolder / TEXT("Materials");
 
 	FDetailTextures Detail;
 	Detail.Chitin = LoadQuietly<UTexture2D>(Folder / ChitinTextureName, ChitinTextureName);
 	Detail.Flesh = LoadQuietly<UTexture2D>(Folder / FleshTextureName, FleshTextureName);
+	Detail.Capillaries = LoadQuietly<UTexture2D>(Folder / CapillaryTextureName, CapillaryTextureName);
+	if (!Detail.Capillaries || bRebuild)
+	{
+		Detail.Capillaries = BuildDetailTexture(Folder, CapillaryTextureName, eclipse::DetailKind::Capillaries, Detail.Capillaries);
+	}
 	if (!Detail.Chitin || bRebuild)
 	{
 		Detail.Chitin = BuildDetailTexture(Folder, ChitinTextureName, eclipse::DetailKind::Chitin, Detail.Chitin);
@@ -529,7 +645,7 @@ bool FEclipseMaterials::Ensure(const FString& OutputFolder, bool bRebuild, FEcli
 		UMaterial* Master = LoadQuietly<UMaterial>(Folder / Name, Name);
 		if (!Master || bRebuild)
 		{
-			Master = BuildMaster(Folder, Kind == 1, Master, Detail, OutError);
+			Master = BuildMaster(Folder, Kind == 1, Master, Detail, Options, OutError);
 			if (!Master)
 			{
 				return false;
@@ -568,6 +684,22 @@ bool FEclipseMaterials::Ensure(const FString& OutputFolder, bool bRebuild, FEcli
 			return false;
 		}
 		Out.*Spec.Slot = Instance;
+	}
+
+	// The halo must end where the grown shells do: keep the surfaces'
+	// HaloReach in step with the setting the shells were grown with.
+	for (UMaterialInterface* Surface : {Out.Overlay, Out.Replace})
+	{
+		auto* Instance = Cast<UMaterialInstanceConstant>(Surface);
+		float Current = 0.0f;
+		if (Instance && Instance->GetScalarParameterValue(FHashedMaterialParameterInfo(TEXT("HaloReach")), Current) &&
+			!FMath::IsNearlyEqual(Current, Options.HaloReach))
+		{
+			Instance->Modify();
+			Instance->SetScalarParameterValueEditorOnly(FMaterialParameterInfo(TEXT("HaloReach")), Options.HaloReach);
+			Instance->PostEditChange();
+			Instance->MarkPackageDirty();
+		}
 	}
 	return true;
 }

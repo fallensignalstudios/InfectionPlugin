@@ -30,6 +30,13 @@ struct GrowthParams {
     float veinHeight = 0.004f;   // how far a vein lifts off clean tissue
     float coreRadius = 0.05f;    // glowing heart around each seed
 
+    // Colour ---------------------------------------------------------------
+    float bruising = 0.5f;       // how much of the tissue is mottled with dark bruises, 0..1
+    // How far past the front, as a share of its reach, the clean tissue
+    // shows the infection coming: a darkening tint and fine capillaries.
+    // The overlay shell is extended this far to carry it.
+    float haloReach = 0.35f;
+
     // Carapace -------------------------------------------------------------
     float plateSize = 0.085f;    // mean spacing between plate centres
     float plateStretch = 3.5f;   // plates elongate along the spread into sinew strands
@@ -103,8 +110,10 @@ ECLIPSECORE_API Mesh corrupt(const Mesh& host, const std::vector<Vec3>& seeds, c
 // it sits just above the original. Rendered over the untouched host with a
 // masked material, the host keeps its own materials everywhere else. If
 // sourceVertex is given it receives the surface vertex each shell vertex
-// came from.
-ECLIPSECORE_API Mesh extractShell(const Mesh& surface, float offset, std::vector<uint32_t>* sourceVertex = nullptr);
+// came from. With haloReach (GrowthParams::haloReach) the shell also covers
+// clean tissue up to that far past the front, to carry the halo.
+ECLIPSECORE_API Mesh extractShell(const Mesh& surface, float offset, std::vector<uint32_t>* sourceVertex = nullptr,
+                                  float haloReach = 0.0f);
 
 // A sparse record of where the corruption is and when it arrived, small
 // enough to keep at runtime for gameplay queries ("how infected is this

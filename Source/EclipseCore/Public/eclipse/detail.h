@@ -8,9 +8,10 @@
 namespace eclipse {
 
 // Fine surface detail too small to model, for the materials to tile over
-// the generated meshes: the scales, ridges and pits of carapace, and the
-// folds, pores and veinlets of soft tissue.
-enum class DetailKind { Chitin, Flesh };
+// the generated meshes: the scales, ridges and pits of carapace, the folds,
+// pores and veinlets of soft tissue, and the network of capillaries the
+// infection sends out ahead of itself (its height is 1 along each vessel).
+enum class DetailKind { Chitin, Flesh, Capillaries };
 
 // A square, seamlessly tiling map, row-major RGBA bytes:
 //   R, G  slope of the height along u and v, 128 = flat. Slopes rather than

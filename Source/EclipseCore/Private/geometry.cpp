@@ -7,6 +7,23 @@
 
 namespace eclipse {
 
+namespace {
+
+CorruptionAttributes lerpAttributes(const CorruptionAttributes& a, const CorruptionAttributes& b, float t) {
+    CorruptionAttributes r;
+    r.infection = lerpf(a.infection, b.infection, t);
+    r.glow = lerpf(a.glow, b.glow, t);
+    r.crack = lerpf(a.crack, b.crack, t);
+    r.arrival = lerpf(a.arrival, b.arrival, t);
+    r.plateTint = t < 0.5f ? a.plateTint : b.plateTint;  // a random id, not a quantity
+    r.height = lerpf(a.height, b.height, t);
+    r.flesh = lerpf(a.flesh, b.flesh, t);
+    r.tone = lerpf(a.tone, b.tone, t);
+    return r;
+}
+
+}  // namespace
+
 std::vector<Vec3> sampleQuadratic(const Vec3& a, const Vec3& control, const Vec3& b, int samples) {
     std::vector<Vec3> out;
     for (int i = 0; i < samples; ++i) {
@@ -66,7 +83,7 @@ void appendTube(Mesh& mesh, const std::vector<Vec3>& inputPoints, const std::vec
                 resampledPoints.push_back(lerp(inputPoints[seg], inputPoints[seg + 1], t));
                 // A sharp tip stays sharp: only the last sample keeps radius 0.
                 resampledRadii.push_back(k + 1 == count ? inputRadii.back() : lerpf(inputRadii[seg], inputRadii[seg + 1], t));
-                resampledAttributes.push_back(t < 0.5f ? inputAttributes[seg] : inputAttributes[seg + 1]);
+                resampledAttributes.push_back(lerpAttributes(inputAttributes[seg], inputAttributes[seg + 1], t));
             }
         }
     }

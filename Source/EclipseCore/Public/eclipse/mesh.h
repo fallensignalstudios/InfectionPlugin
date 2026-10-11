@@ -21,6 +21,7 @@ struct CorruptionAttributes {
     float plateTint = 0;  // per-plate random, for colour variation
     float height = 0;     // how far the surface was pushed out, in metres
     float flesh = 0;      // exposed soft tissue: wet, translucent, lit from within
+    float tone = 0;       // colour variation: <0 bruised (dark wine), >0 bone (pale horn tips)
 };
 
 struct Mesh {

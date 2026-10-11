@@ -101,6 +101,8 @@ namespace
 		P.plateStretch = S.PlateStretch;
 		P.plateThickness = S.PlateThickness * 0.01f;
 		P.seamGlow = S.SeamGlow;
+		P.bruising = S.Bruising;
+		P.haloReach = S.HaloReach;
 		return P;
 	}
 
@@ -128,9 +130,20 @@ namespace
 		F.roughness = S.Roughness;
 		F.tendrilBranching = S.RootBranching;
 		F.spikeBarbs = S.HornBarbs;
+		F.slime = S.bSlime;
+		F.slimeChance = S.SlimeChance;
 		F.sacs = S.bSacs;
 		F.sacChance = S.SacChance;
 		return F;
+	}
+
+	FEclipseMaterialOptions ToMaterialOptions(const UEclipseGrowthSettings& S)
+	{
+		FEclipseMaterialOptions O;
+		O.bDisplacement = S.bEnableNanite && S.bNaniteDisplacement;
+		O.DisplacementDepth = S.DisplacementDepth;
+		O.HaloReach = S.HaloReach;
+		return O;
 	}
 
 	// Enabled seeds within reach of the host, in a stable order so the same
@@ -304,7 +317,7 @@ namespace EclipseGrowthRunner
 		FEclipseMaterials Materials;
 		FText Error;
 		const FString Folder = Settings.OutputPackagePath();
-		if (!FEclipseMaterials::Ensure(Folder, false, Materials, Error))
+		if (!FEclipseMaterials::Ensure(Folder, false, Materials, Error, ToMaterialOptions(Settings)))
 		{
 			return Error;
 		}
@@ -363,7 +376,7 @@ namespace EclipseGrowthRunner
 				FText::FromString(Label), FText::AsNumber(static_cast<int64>(Source.Mesh.vertexCount()))));
 			eclipse::Growth Result = eclipse::grow(Source.Mesh, Seeds, Params, Features);
 			std::vector<uint32_t> ShellSources;
-			const eclipse::Mesh Surface = bOverlay ? eclipse::extractShell(Result.surface, OverlayLift, &ShellSources) : std::move(Result.surface);
+			const eclipse::Mesh Surface = bOverlay ? eclipse::extractShell(Result.surface, OverlayLift, &ShellSources, Params.haloReach) : std::move(Result.surface);
 			eclipse::SkinTable SurfaceSkin, GrowthSkin, FleshSkin;
 			if (bSkeletal)
 			{
@@ -488,7 +501,7 @@ namespace EclipseGrowthRunner
 	{
 		FEclipseMaterials Materials;
 		FText Error;
-		if (!FEclipseMaterials::Ensure(Settings.OutputPackagePath(), true, Materials, Error))
+		if (!FEclipseMaterials::Ensure(Settings.OutputPackagePath(), true, Materials, Error, ToMaterialOptions(Settings)))
 		{
 			return Error;
 		}

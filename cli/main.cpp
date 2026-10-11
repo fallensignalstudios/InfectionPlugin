@@ -190,7 +190,8 @@ int main(int argc, char** argv) {
 
     if (detailMaps) {
         std::filesystem::create_directories(outDir);
-        for (auto [kind, name] : {std::pair{DetailKind::Chitin, "detail_chitin.png"}, std::pair{DetailKind::Flesh, "detail_flesh.png"}}) {
+        for (auto [kind, name] : {std::pair{DetailKind::Chitin, "detail_chitin.png"}, std::pair{DetailKind::Flesh, "detail_flesh.png"},
+                                  std::pair{DetailKind::Capillaries, "detail_capillaries.png"}}) {
             std::string path = (std::filesystem::path(outDir) / name).string();
             writePng(path, litDetail(makeDetailMap(kind, 512)));
             std::printf("%s\n", path.c_str());
@@ -246,7 +247,7 @@ int main(int argc, char** argv) {
         std::string base = (std::filesystem::path(outDir) / tag).string();
         std::string err;
         Mesh shell;
-        if (overlay) shell = extractShell(g.surface, 0.0015f);
+        if (overlay) shell = extractShell(g.surface, 0.0015f, nullptr, p.haloReach);
         const Mesh& exported = overlay ? shell : g.surface;
         if (!writeGlb(base + ".glb", {{overlay ? "EclipseShell" : "EclipseSurface", &exported}, {"EclipseGrowths", &g.growths},
                        {"EclipseFlesh", &g.flesh}},
@@ -261,9 +262,9 @@ int main(int argc, char** argv) {
         std::printf("  coverage %.2f -> %s.glb (hash %016llx)\n", p.coverage, base.c_str(),
                     static_cast<unsigned long long>(meshHash(grown)));
         std::printf("    %zu roots (%zu rootlets), %zu vein tubes, %zu horns (%zu barbs), %zu hearts (%zu maws), %zu vertebrae, %zu nodules, "
-                    "%zu sac clusters, %zu strands, %zu bridges, %zu membranes; %zu growth + %zu flesh triangles\n",
+                    "%zu sac clusters, %zu slime, %zu strands, %zu bridges, %zu membranes; %zu growth + %zu flesh triangles\n",
                     g.stats.tendrils, g.stats.rootlets, g.stats.veinTubes, g.stats.spikes, g.stats.barbs, g.stats.hearts, g.stats.maws,
-                    g.stats.vertebrae, g.stats.nodules, g.stats.sacs, g.stats.strands, g.stats.bridges,
+                    g.stats.vertebrae, g.stats.nodules, g.stats.sacs, g.stats.slime, g.stats.strands, g.stats.bridges,
                     g.stats.membranes, g.growths.triangleCount(), g.flesh.triangleCount());
         if (preview) {
             if (!focus.empty()) grown = cropToSphere(grown, {focus[0], focus[1], focus[2]}, focus[3]);
