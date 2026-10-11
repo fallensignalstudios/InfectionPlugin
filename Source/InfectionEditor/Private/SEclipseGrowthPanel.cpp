@@ -82,6 +82,12 @@ void SEclipseGrowthPanel::Construct(const FArguments& InArgs)
 					LOCTEXT("NextTip", "Step the Seed on by one and grow the selection again: the same settings, a different growth."),
 					FOnClicked::CreateSP(this, &SEclipseGrowthPanel::OnVariation, 1))
 			]
+			+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(2.0f)
+			[
+				Button(LOCTEXT("Remove", "Remove from Selected"),
+					LOCTEXT("RemoveTip", "Take the corruption off each selected mesh (or the mesh under selected corruption) and show the host again. Undoable; generated assets stay in the output folder."),
+					FOnClicked::CreateSP(this, &SEclipseGrowthPanel::OnRemove))
+			]
 		]
 		+ SVerticalBox::Slot()
 		.AutoHeight()
@@ -117,6 +123,12 @@ FReply SEclipseGrowthPanel::OnVariation(int32 Step)
 	Details->ForceRefresh();
 	Status = FText::Format(LOCTEXT("Variation", "Seed {0}: {1}"), FText::AsNumber(Settings->Seed),
 		EclipseGrowthRunner::GrowOnSelection(*Settings));
+	return FReply::Handled();
+}
+
+FReply SEclipseGrowthPanel::OnRemove()
+{
+	Status = EclipseGrowthRunner::RemoveFromSelection();
 	return FReply::Handled();
 }
 

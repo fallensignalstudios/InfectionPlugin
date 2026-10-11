@@ -6,5 +6,6 @@ public class InfectionRuntime : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine" });
+		PrivateDependencyModuleNames.Add("NetCore");  // replication of the spread component
 	}
 }

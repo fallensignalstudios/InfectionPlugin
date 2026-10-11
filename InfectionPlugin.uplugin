@@ -1,9 +1,9 @@
 {
 	"FileVersion": 3,
-	"Version": 1,
-	"VersionName": "0.3.0",
+	"Version": 2,
+	"VersionName": "0.4.0",
 	"FriendlyName": "Infection (Eclipse Biomass)",
-	"Description": "Grows procedural Eclipse corruption - carapace, glowing veins, thorns, eyes, strands and torn membranes - over static meshes in the level.",
+	"Description": "Grows procedural Eclipse corruption - carapace, glowing veins, thorns, eyes, strands and torn membranes - over static meshes and characters, then spreads, burns and breaks out during play.",
 	"Category": "Procedural",
 	"CreatedBy": "Fallen Signal Studios",
 	"CanContainContent": true,

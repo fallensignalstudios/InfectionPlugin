@@ -37,6 +37,8 @@
 namespace
 {
 	const FName GeneratedTag(TEXT("EclipseGenerated"));
+	// On a host mesh component that Replace mode hid, so it can be shown again.
+	const FName HiddenByEclipseTag(TEXT("EclipseHidden"));
 	const FName SurfaceSlot(TEXT("EclipseSurface"));
 	const FName GrowthsSlot(TEXT("EclipseGrowths"));
 	const FName FleshSlot(TEXT("EclipseFlesh"));
@@ -304,6 +306,26 @@ namespace
 		Spread->RegisterComponent();
 	}
 
+	// Replace mode hides the host behind its corrupted surface; Overlay and
+	// removal show it again, but only if it was Eclipse that hid it.
+	void SetHostHidden(UMeshComponent* Component, bool bHidden)
+	{
+		if (bHidden == Component->ComponentTags.Contains(HiddenByEclipseTag))
+		{
+			return;
+		}
+		Component->Modify();
+		Component->SetVisibility(!bHidden);
+		if (bHidden)
+		{
+			Component->ComponentTags.Add(HiddenByEclipseTag);
+		}
+		else
+		{
+			Component->ComponentTags.Remove(HiddenByEclipseTag);
+		}
+	}
+
 	void PlaceFollower(AActor* Host, USkeletalMeshComponent* Leader, USkeletalMesh* Mesh, const FString& Name)
 	{
 		Host->Modify();
@@ -551,12 +573,8 @@ namespace EclipseGrowthRunner
 					// growths that appear just after their tissue, fully revealed.
 					PlaceSpread(HostActor, Map, 1.0f + Settings.VeinReach + 0.15f);
 				}
-				if (!bOverlay)
-				{
-					// The corrupted surface stands in for the host entirely.
-					Piece.Host->Component->Modify();
-					Piece.Host->Component->SetVisibility(false);
-				}
+				// In Replace mode the corrupted surface stands in for the host entirely.
+				SetHostHidden(Piece.Host->Component, !bOverlay);
 				++Grown;
 			}
 
@@ -716,17 +734,14 @@ namespace EclipseGrowthRunner
 				// growths that appear just after their tissue, fully revealed.
 				PlaceSpread(Host.Actor, Map, 1.0f + Settings.VeinReach + 0.15f);
 			}
-			if (!bOverlay)
+			if (!bOverlay && bSkeletal)
 			{
-				// The corrupted surface stands in for the host entirely.
+				// Hidden, the leader must still animate for its followers.
 				Host.Component->Modify();
-				if (bSkeletal)
-				{
-					// Hidden, the leader must still animate for its followers.
-					Host.Skeletal->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
-				}
-				Host.Component->SetVisibility(false);
+				Host.Skeletal->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
 			}
+			// In Replace mode the corrupted surface stands in for the host entirely.
+			SetHostHidden(Host.Component, !bOverlay);
 			++Grown;
 		}
 
@@ -740,6 +755,61 @@ namespace EclipseGrowthRunner
 			Message += TEXT("\nNew assets are unsaved; use Save All to keep them.");
 		}
 		return FText::FromString(Message);
+	}
+
+	FText RemoveFromSelection()
+	{
+		UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+		if (!World)
+		{
+			return LOCTEXT("NoWorldRemove", "No editor world is open.");
+		}
+		// The selected hosts, or the hosts of selected output.
+		TArray<AActor*> Targets;
+		USelection* Selection = GEditor->GetSelectedActors();
+		for (FSelectionIterator It(*Selection); It; ++It)
+		{
+			AActor* Actor = Cast<AActor>(*It);
+			while (Actor && Actor->Tags.Contains(GeneratedTag))
+			{
+				Actor = Actor->GetAttachParentActor();
+			}
+			if (Actor)
+			{
+				Targets.AddUnique(Actor);
+			}
+		}
+		if (Targets.Num() == 0)
+		{
+			return LOCTEXT("NoRemoveTarget", "Select grown meshes, or their corruption, to remove it from.");
+		}
+		FScopedTransaction Transaction(LOCTEXT("RemoveTransaction", "Remove Eclipse Corruption"));
+		int32 Cleaned = 0;
+		for (AActor* Host : Targets)
+		{
+			const FName HostTag(*(TEXT("EclipseHost_") + Host->GetName()));
+			bool bHad = false;
+			for (TActorIterator<AActor> It(World); It && !bHad; ++It)
+			{
+				bHad = It->Tags.Contains(GeneratedTag) && It->Tags.Contains(HostTag);
+			}
+			for (UActorComponent* Component : Host->GetInstanceComponents())
+			{
+				bHad |= Component && Component->ComponentTags.Contains(GeneratedTag);
+			}
+			RemovePreviousOutput(World, HostTag);
+			RemovePreviousInstanceComponents(Host);
+			TInlineComponentArray<UMeshComponent*> Meshes(Host);
+			for (UMeshComponent* Mesh : Meshes)
+			{
+				bHad |= Mesh->ComponentTags.Contains(HiddenByEclipseTag);
+				SetHostHidden(Mesh, false);
+			}
+			Cleaned += bHad ? 1 : 0;
+		}
+		return FText::Format(LOCTEXT("Removed",
+			"Removed the corruption from {0} of {1} actor(s). Its generated assets stay in the output folder; delete them there if unused."),
+			FText::AsNumber(Cleaned), FText::AsNumber(Targets.Num()));
 	}
 
 	FText AddSeedOnSelection()

@@ -12,6 +12,59 @@ class UTexture2D;
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FEclipseSpreadEvent);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FEclipseSpotEvent, FVector, Location, float, Radius);
 
+// An outbreak in progress: a sphere revealing the corruption, growing from
+// its centre (in the owning actor's space) at Speed up to MaxRadius.
+USTRUCT(BlueprintType)
+struct INFECTIONRUNTIME_API FEclipseOutbreak
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, SaveGame, Category = "Eclipse")
+	FVector Centre = FVector::ZeroVector;
+
+	// World centimetres revealed so far. Each machine advances its own, so it
+	// is not replicated; a client that learns of an outbreak late catches up
+	// from StartTime.
+	UPROPERTY(BlueprintReadOnly, NotReplicated, SaveGame, Category = "Eclipse")
+	float Radius = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, SaveGame, Category = "Eclipse")
+	float MaxRadius = 0.0f;
+
+	// Centimetres a second.
+	UPROPERTY(BlueprintReadOnly, SaveGame, Category = "Eclipse")
+	float Speed = 0.0f;
+
+	// Server world time it started, in the game state's clock.
+	UPROPERTY(BlueprintReadOnly, SaveGame, Category = "Eclipse")
+	double StartTime = 0.0;
+
+	// Whether this machine has placed its front yet (see Radius).
+	UPROPERTY(NotReplicated, Transient)
+	bool bLocallyStarted = false;
+};
+
+// Everything a spread changes at runtime, for a save game: GetState() before
+// saving, RestoreState() after loading the level.
+USTRUCT(BlueprintType)
+struct INFECTIONRUNTIME_API FEclipseSpreadState
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadWrite, SaveGame, Category = "Eclipse")
+	float Growth = 0.0f;
+
+	UPROPERTY(BlueprintReadWrite, SaveGame, Category = "Eclipse")
+	float PlayRate = 0.0f;
+
+	// Actor-space centre, actor-space radius in W.
+	UPROPERTY(BlueprintReadWrite, SaveGame, Category = "Eclipse")
+	TArray<FVector4> Burns;
+
+	UPROPERTY(BlueprintReadWrite, SaveGame, Category = "Eclipse")
+	TArray<FEclipseOutbreak> Outbreaks;
+};
+
 // Plays a grown corruption during the game. Every mesh on this actor (and on
 // actors attached to it) that uses an Eclipse material follows Growth: 0
 // shows nothing, 1 the corruption as grown, FullGrowth also the veins that
@@ -20,6 +73,10 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FEclipseSpotEvent, FVector, Locatio
 // point, wherever it was grown; GetInfectionAt() tells gameplay how infected
 // a spot is right now. The Eclipse Infection subsystem does the same for a
 // whole level without knowing which actor is hit.
+//
+// In multiplayer it replicates (when its actor does): call Burn,
+// StartOutbreak and the playback functions on the server and every client
+// follows, including clients that join later.
 //
 // The Eclipse Growth panel adds one of these to every host it grows on.
 UCLASS(ClassGroup = (Eclipse), meta = (BlueprintSpawnableComponent, DisplayName = "Eclipse Spread"))
@@ -40,7 +97,7 @@ public:
 	TObjectPtr<UEclipseInfectionMap> InfectionMap;
 
 	// How far the growth has played; see the class comment.
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Eclipse", meta = (ClampMin = "0"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, ReplicatedUsing = OnRep_Growth, Category = "Eclipse", meta = (ClampMin = "0"))
 	float Growth = 1.5f;
 
 	// Growth at which the spread counts as finished.
@@ -133,6 +190,15 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Eclipse|Outbreaks")
 	int32 GetOutbreakCount() const { return Outbreaks.Num(); }
 
+	// Everything changed at runtime (growth, playback, burns, outbreaks), to
+	// keep in a save game.
+	UFUNCTION(BlueprintPure, Category = "Eclipse|Saving")
+	FEclipseSpreadState GetState() const;
+
+	// Put back a state from GetState(), carrying on from where it was.
+	UFUNCTION(BlueprintCallable, Category = "Eclipse|Saving")
+	void RestoreState(const FEclipseSpreadState& State);
+
 	// Where the corruption was grown, in world space (conservative). Empty
 	// without an infection map.
 	FBox GetWorldBounds() const;
@@ -150,6 +216,7 @@ public:
 	}
 
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 protected:
 	virtual void BeginPlay() override;
@@ -157,13 +224,17 @@ protected:
 	virtual void OnUnregister() override;
 
 private:
-	struct FOutbreak
-	{
-		FVector Local;      // actor-space centre
-		float Radius;       // world centimetres, growing
-		float MaxRadius;
-		float Speed;        // centimetres a second
-	};
+	UFUNCTION()
+	void OnRep_Growth();
+	UFUNCTION()
+	void OnRep_PlayRate();
+	UFUNCTION()
+	void OnRep_Events();
+
+	// The game state's server clock, or this world's when there is none.
+	double ServerTime() const;
+	// Places the front of outbreaks this machine has not started yet, from their start time.
+	void CatchUpOutbreaks();
 
 	// Dynamic instances of every Eclipse material slot under this actor,
 	// stopping at attached actors that have a spread component of their own.
@@ -183,7 +254,12 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UTexture2D> EventTexture;
 
+	UPROPERTY(ReplicatedUsing = OnRep_Events)
 	TArray<FVector4> Burns;  // actor-space centre, actor-space radius in W
-	TArray<FOutbreak> Outbreaks;
+
+	UPROPERTY(ReplicatedUsing = OnRep_Events)
+	TArray<FEclipseOutbreak> Outbreaks;
+
+	UPROPERTY(ReplicatedUsing = OnRep_PlayRate)
 	float PlayRate = 0.0f;
 };

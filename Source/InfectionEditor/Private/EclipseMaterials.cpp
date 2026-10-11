@@ -1,6 +1,7 @@
 #include "EclipseMaterials.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "EclipseLog.h"
 #include "EclipseMeshBridge.h"
 #include "Engine/Texture2D.h"
 #include "Factories/MaterialFactoryNew.h"
@@ -615,7 +616,7 @@ namespace
 									 SetStructFloat(M, TEXT("DisplacementScaling"), TEXT("Center"), 0.0f);
 				if (!bTessellation || !bScaled)
 				{
-					UE_LOG(LogTemp, Warning,
+					UE_LOG(LogEclipse, Warning,
 						TEXT("Eclipse: could not enable tessellation on %s by property name; enable it in the material's Nanite settings."),
 						*M->GetName());
 				}

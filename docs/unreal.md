@@ -41,6 +41,13 @@ replaced each time you grow again. Their
 meshes are written to `<Output Folder>/Generated` and are unsaved until you
 **Save All**. Undo removes the placed actors; the generated assets stay until you delete them.
 
+**Remove from Selected** takes the corruption off each selected host (or the
+host of selected corruption): its generated actors, its Spread and Follower
+components, and, after a Replace grow, shows the host mesh again. It can be
+undone, and leaves the generated assets in the output folder. Hosts hidden by a
+Replace grow from before this button existed are not marked; show them by
+hand (Rendering → Visible).
+
 ### If an earlier version was used
 
 The panel remembers its settings, so values from before the art pass (plate
@@ -173,6 +180,7 @@ on the host and on the actors attached to it.
 | `OnBurned`, `OnOutbreakStarted`, `OnOutbreakFinished` | Events with a world location and radius: hang sounds, Niagara bursts and camera shakes on them. `OnBurned` reports the scar as kept (after any merge). |
 | `GetInfectionAt(Location, Radius)`, `IsInfectedAt` | How infected a spot is right now (0..1): arrived or revealed by an outbreak, and not burned. Use it for damage zones, AI avoidance, audio. |
 | `GetBurnCount`, `GetOutbreakCount`, `GetWorldBounds` | What it holds, and the world box around its corruption. |
+| `GetState`, `RestoreState` | Everything above, for save games (see Saving). |
 
 ### Without knowing which actor: the Eclipse Infection subsystem
 
@@ -202,6 +210,25 @@ subsystem about `SearchRadius` around itself and fires:
 `Sense()` checks at once; `GetInfection` and `IsInInfection` give the last
 result. For AI, call the subsystem's `IsInfectedAt` from an EQS or a
 Behaviour Tree service to keep a pawn off the corruption, or onto it.
+
+### Multiplayer
+
+The Spread component replicates when its actor does: tick **Replicates** on a
+host that should stay in step across players (static level geometry usually
+does not replicate by default). Call `Burn`, `StartOutbreak`, `StartSpread`,
+`Recede` and `SetGrowth` (or the subsystem's `BurnAt` and `StartOutbreakAt`)
+on the server; every client follows, and a client that joins later sees the
+same scars and outbreaks, each outbreak's front placed by how long ago it
+started on the server's clock. A client calling them on its own changes only
+what it sees, until the server's state next arrives. Queries and the sensor
+answer on any machine from what that machine shows.
+
+### Saving
+
+`GetState` returns an `Eclipse Spread State` (growth, play rate, burns and
+outbreaks with their fronts) to keep in a `SaveGame`; `RestoreState` puts it
+back after loading, carrying on from where it was. Keep one per infected
+actor, keyed by the actor's name.
 
 Notes:
 - Burns, outbreaks and queries need the materials from this version: press

@@ -6,7 +6,10 @@
 #include "EclipseInfectionSubsystem.h"
 #include "Engine/Texture2D.h"
 #include "Engine/World.h"
+#include "EclipseLog.h"
 #include "GameFramework/Actor.h"
+#include "GameFramework/GameStateBase.h"
+#include "Net/UnrealNetwork.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 
@@ -35,6 +38,94 @@ UEclipseSpreadComponent::UEclipseSpreadComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
 	PrimaryComponentTick.bStartWithTickEnabled = false;  // ticks only while something moves
+	SetIsReplicatedByDefault(true);
+}
+
+void UEclipseSpreadComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(UEclipseSpreadComponent, Growth);
+	DOREPLIFETIME(UEclipseSpreadComponent, PlayRate);
+	DOREPLIFETIME(UEclipseSpreadComponent, Burns);
+	DOREPLIFETIME(UEclipseSpreadComponent, Outbreaks);
+}
+
+void UEclipseSpreadComponent::OnRep_Growth()
+{
+	Apply();
+}
+
+void UEclipseSpreadComponent::OnRep_PlayRate()
+{
+	SetComponentTickEnabled(NeedsTick());
+}
+
+void UEclipseSpreadComponent::OnRep_Events()
+{
+	CatchUpOutbreaks();
+	Apply();
+	SetComponentTickEnabled(NeedsTick());
+}
+
+double UEclipseSpreadComponent::ServerTime() const
+{
+	const UWorld* World = GetWorld();
+	if (!World)
+	{
+		return 0.0;
+	}
+	const AGameStateBase* GameState = World->GetGameState();
+	return GameState ? GameState->GetServerWorldTimeSeconds() : World->GetTimeSeconds();
+}
+
+void UEclipseSpreadComponent::CatchUpOutbreaks()
+{
+	const double Now = ServerTime();
+	for (FEclipseOutbreak& O : Outbreaks)
+	{
+		if (!O.bLocallyStarted)
+		{
+			O.bLocallyStarted = true;
+			O.Radius = O.Speed > 0.0f ? static_cast<float>(FMath::Clamp((Now - O.StartTime) * O.Speed, 0.0, double(O.MaxRadius)))
+									  : O.MaxRadius;
+		}
+	}
+}
+
+FEclipseSpreadState UEclipseSpreadComponent::GetState() const
+{
+	FEclipseSpreadState State;
+	State.Growth = Growth;
+	State.PlayRate = PlayRate;
+	State.Burns = Burns;
+	State.Outbreaks = Outbreaks;
+	return State;
+}
+
+void UEclipseSpreadComponent::RestoreState(const FEclipseSpreadState& State)
+{
+	Growth = FMath::Max(State.Growth, 0.0f);
+	Burns = State.Burns;
+	if (Burns.Num() > MaxBurns)
+	{
+		Burns.SetNum(MaxBurns);
+	}
+	Outbreaks = State.Outbreaks;
+	if (Outbreaks.Num() > MaxOutbreaks)
+	{
+		Outbreaks.SetNum(MaxOutbreaks);
+	}
+	// Carry each outbreak on from its saved front, on this session's clock.
+	const double Now = ServerTime();
+	for (FEclipseOutbreak& O : Outbreaks)
+	{
+		O.Radius = FMath::Clamp(O.Radius, 0.0f, O.MaxRadius);
+		O.StartTime = O.Speed > 0.0f ? Now - O.Radius / O.Speed : Now;
+		O.bLocallyStarted = true;
+	}
+	PlayRate = State.PlayRate;
+	Apply();
+	SetComponentTickEnabled(NeedsTick());
 }
 
 void UEclipseSpreadComponent::OnRegister()
@@ -65,13 +156,22 @@ void UEclipseSpreadComponent::BeginPlay()
 {
 	Super::BeginPlay();
 	CollectMaterials();
-	if (bSpreadOnBeginPlay)
+	if (Materials.Num() == 0)
+	{
+		UE_LOG(LogEclipse, Verbose, TEXT("%s: no Eclipse materials on %s; it answers queries but shows nothing."),
+			*GetName(), *GetNameSafe(GetOwner()));
+	}
+	// In multiplayer the server starts the spread and clients follow it.
+	const AActor* Owner = GetOwner();
+	if (bSpreadOnBeginPlay && (!Owner || Owner->HasAuthority()))
 	{
 		StartSpread(false);
 	}
 	else
 	{
+		CatchUpOutbreaks();
 		Apply();
+		SetComponentTickEnabled(NeedsTick());
 	}
 }
 
@@ -160,8 +260,8 @@ void UEclipseSpreadComponent::UpdateEvents(const FVector& EventOrigin)
 	}
 	for (int32 Index = 0; Index < Outbreaks.Num(); ++Index)
 	{
-		const FOutbreak& O = Outbreaks[Index];
-		const FVector Relative = ActorTransform.TransformPosition(O.Local) - EventOrigin;
+		const FEclipseOutbreak& O = Outbreaks[Index];
+		const FVector Relative = ActorTransform.TransformPosition(O.Centre) - EventOrigin;
 		Texels[MaxBurns + Index] = FLinearColor(Relative.X, Relative.Y, Relative.Z, O.Radius);
 	}
 	FUpdateTextureRegion2D* Region = new FUpdateTextureRegion2D(0, 0, 0, 0, MaxBurns, 2);
@@ -205,14 +305,14 @@ void UEclipseSpreadComponent::TickComponent(float DeltaTime, ELevelTick TickType
 	// Outbreaks advance on their own clocks, whatever the spread is doing.
 	const AActor* Owner = GetOwner();
 	TArray<TPair<FVector, float>> Finished;
-	for (FOutbreak& O : Outbreaks)
+	for (FEclipseOutbreak& O : Outbreaks)
 	{
 		if (O.Radius < O.MaxRadius)
 		{
 			O.Radius = FMath::Min(O.MaxRadius, O.Radius + O.Speed * DeltaTime);
 			if (O.Radius >= O.MaxRadius && Owner)
 			{
-				Finished.Emplace(Owner->GetActorTransform().TransformPosition(O.Local), O.MaxRadius);
+				Finished.Emplace(Owner->GetActorTransform().TransformPosition(O.Centre), O.MaxRadius);
 			}
 		}
 	}
@@ -267,7 +367,7 @@ bool UEclipseSpreadComponent::NeedsTick() const
 	{
 		return true;
 	}
-	for (const FOutbreak& O : Outbreaks)
+	for (const FEclipseOutbreak& O : Outbreaks)
 	{
 		if (O.Radius < O.MaxRadius)
 		{
@@ -356,12 +456,20 @@ void UEclipseSpreadComponent::ClearBurns()
 void UEclipseSpreadComponent::StartOutbreak(FVector WorldLocation, float MaxRadius, float Speed)
 {
 	const AActor* Owner = GetOwner();
-	if (!Owner || MaxRadius <= 0.0f || Outbreaks.Num() >= MaxOutbreaks)
+	if (!Owner || MaxRadius <= 0.0f)
 	{
 		return;
 	}
-	FOutbreak O;
-	O.Local = Owner->GetActorTransform().InverseTransformPosition(WorldLocation);
+	if (Outbreaks.Num() >= MaxOutbreaks)
+	{
+		UE_LOG(LogEclipse, Warning, TEXT("%s: already %d outbreaks; ignoring another (ClearOutbreaks to start over)."),
+			*GetPathName(), MaxOutbreaks);
+		return;
+	}
+	FEclipseOutbreak O;
+	O.StartTime = ServerTime();
+	O.bLocallyStarted = true;
+	O.Centre = Owner->GetActorTransform().InverseTransformPosition(WorldLocation);
 	O.Radius = 0.0f;
 	O.MaxRadius = MaxRadius;
 	O.Speed = FMath::Max(Speed, 0.0f);
@@ -397,9 +505,9 @@ float UEclipseSpreadComponent::OutbreakReveal(const FVector& WorldPoint, float A
 	const double Softness = FMath::Max(OutbreakSoftness, 1.0f);
 	const double Lag = FMath::Min(Arrival, MaxOutbreakLag) * OutbreakRoughness;
 	double Best = 0.0;
-	for (const FOutbreak& O : Outbreaks)
+	for (const FEclipseOutbreak& O : Outbreaks)
 	{
-		const double D = FVector::Distance(WorldPoint, ActorTransform.TransformPosition(O.Local));
+		const double D = FVector::Distance(WorldPoint, ActorTransform.TransformPosition(O.Centre));
 		Best = FMath::Max(Best, FMath::Clamp((O.Radius - D - Lag) / Softness, 0.0, 1.0));
 	}
 	return static_cast<float>(Best);
