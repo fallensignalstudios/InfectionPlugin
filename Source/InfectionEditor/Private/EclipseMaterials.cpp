@@ -9,7 +9,7 @@
 #include "Materials/Material.h"
 #include "Materials/MaterialExpressionCameraVectorWS.h"
 #include "Materials/MaterialExpressionCustom.h"
-#include "Materials/MaterialExpressionDistance.h"
+#include "Materials/MaterialExpressionSubtract.h"
 #include "Materials/MaterialExpressionDitherTemporalAA.h"
 #include "Materials/MaterialExpressionLocalPosition.h"
 #include "Materials/MaterialExpressionPreSkinnedNormal.h"
@@ -17,6 +17,7 @@
 #include "Materials/MaterialExpressionScalarParameter.h"
 #include "Materials/MaterialExpressionTextureCoordinate.h"
 #include "Materials/MaterialExpressionTextureObject.h"
+#include "Materials/MaterialExpressionTextureObjectParameter.h"
 #include "Materials/MaterialExpressionTime.h"
 #include "Materials/MaterialExpressionTransform.h"
 #include "Materials/MaterialExpressionVectorParameter.h"
@@ -39,25 +40,53 @@ namespace
 	const TCHAR* ChitinTextureName = TEXT("T_EclipseChitin");
 	const TCHAR* FleshTextureName = TEXT("T_EclipseFlesh");
 	const TCHAR* CapillaryTextureName = TEXT("T_EclipseCapillaries");
+	const TCHAR* NoEventsTextureName = TEXT("T_EclipseNoEvents");
+	// Matches UEclipseSpreadComponent::MaxBurns (and MaxOutbreaks): one row each.
+	constexpr int32 EventSlots = 64;
 	constexpr int32 DetailSize = 512;
 
 	// Shared by every node: how far the growth has played (reveal) and how
 	// overtaken this point is once revealed (s). UV.x is arrival: 0 at the
 	// seed, 1 at the front. Animate Growth from 0 to about 1.4 to replay it.
-	// Burns (from the Eclipse Spread component) are spheres the corruption is
-	// cut out of, D# the distance to each and R# its radius (0 = unused); the
-	// band where it is burning away glows as embers. UV1.x marks soft tissue.
+	// EV comes from the Events node: x how much survives the burns (the band
+	// where it is burning away glows as embers), y how far outbreaks have
+	// revealed this point, z the glow of an outbreak's advancing front.
+	// UV1.x marks soft tissue.
 	const TCHAR* Prelude = TEXT(
-		"float burn = 1.0;\n"
-		"burn *= R0 > 0.0 ? saturate((D0 - R0) / max(BurnSoftness, 1.0)) : 1.0;\n"
-		"burn *= R1 > 0.0 ? saturate((D1 - R1) / max(BurnSoftness, 1.0)) : 1.0;\n"
-		"burn *= R2 > 0.0 ? saturate((D2 - R2) / max(BurnSoftness, 1.0)) : 1.0;\n"
-		"burn *= R3 > 0.0 ? saturate((D3 - R3) / max(BurnSoftness, 1.0)) : 1.0;\n"
-		"float grown = saturate((Growth - UV.x) / max(Softness, 0.001));\n"
+		"float burn = EV.x;\n"
+		"float grown = max(saturate((Growth - UV.x) / max(Softness, 0.001)), EV.y);\n"
 		"float reveal = grown * burn;\n"
 		"float s = saturate(VC.r) * reveal;\n"
 		"float fleshy = saturate(UV1.x);\n"
 		"float ember = 4.0 * burn * (1.0 - burn) * grown * step(0.001, VC.r + VC.g);\n");
+
+	// Burns and outbreaks from the Eclipse Spread component, read from its
+	// event texture: row 0 burns, row 1 outbreaks, each a centre relative to
+	// EventOrigin (so they stay exact in a large world) and a radius. A burn
+	// cuts the corruption out of a sphere, softened over BurnSoftness. An
+	// outbreak reveals it inside a growing sphere; tissue that arrived later
+	// in the grown spread lags behind its front, up to 1.5 x OutbreakRoughness,
+	// so the front follows the corruption's own fingers. Must match
+	// UEclipseSpreadComponent::GetInfectionAt.
+	const TCHAR* EventsCode = TEXT(
+		"float burn = 1.0;\n"
+		"int burns = (int)BurnCount;\n"
+		"[loop] for (int i = 0; i < burns; ++i)\n"
+		"{\n"
+		"    float4 b = Events.Load(int3(i, 0, 0));\n"
+		"    if (b.w > 0.0) burn *= saturate((length(EP - b.xyz) - b.w) / max(BurnSoftness, 1.0));\n"
+		"}\n"
+		"float outbreak = 0.0, front = 0.0;\n"
+		"int outbreaks = (int)OutbreakCount;\n"
+		"float lag = min(UV.x, 1.5) * OutbreakRoughness;\n"
+		"[loop] for (int j = 0; j < outbreaks; ++j)\n"
+		"{\n"
+		"    float4 o = Events.Load(int3(j, 1, 0));\n"
+		"    float r = saturate((o.w - length(EP - o.xyz) - lag) / max(OutbreakSoftness, 1.0));\n"
+		"    outbreak = max(outbreak, r);\n"
+		"    front = max(front, 4.0 * r * (1.0 - r));\n"
+		"}\n"
+		"return float3(burn, outbreak, front);\n");
 
 	// Triplanar detail over the pre-skinned position, so it stays put on an
 	// animated character. PL is in centimetres; DetailScale is one tile. Hard
@@ -140,7 +169,8 @@ namespace
 		"float pulse = 1.0 + PulseAmount * sin(Time * PulseSpeed * 6.2831853 - UV.x * 8.0);\n"
 		"float rim = pow(1.0 - saturate(abs(dot(normalize(NW), normalize(V)))), 3.0);\n"
 		"float3 scatter = ScatterColor * FleshGlow * fleshy * s * (0.3 + rim);\n"
-		"return GlowIntensity * (GlowColor * saturate(VC.g) * reveal * pulse + EmberColor * ember) + scatter;\n");
+		"float frontGlow = 0.35 * EV.z * burn * step(0.001, VC.r + VC.g);\n"
+		"return GlowIntensity * (GlowColor * (saturate(VC.g) * reveal * pulse + frontGlow) + EmberColor * ember) + scatter;\n");
 
 	const TCHAR* RoughnessCode = TEXT(
 		"float bone = saturate(UV1.y);\n"
@@ -327,7 +357,34 @@ namespace
 		UTexture2D* Chitin = nullptr;
 		UTexture2D* Flesh = nullptr;
 		UTexture2D* Capillaries = nullptr;
+		UTexture2D* NoEvents = nullptr;  // default for the Events parameter: no burns, no outbreaks
 	};
+
+	// An all-zero event texture, the shape the spread component writes.
+	UTexture2D* BuildNoEventsTexture(const FString& Folder, UTexture2D* Existing)
+	{
+		TArray<uint8> Zero;
+		Zero.SetNumZeroed(EventSlots * 2 * 4);
+		UTexture2D* Texture = Existing;
+		if (Texture)
+		{
+			Texture->Modify();
+		}
+		else
+		{
+			UPackage* Package = CreatePackage(*(Folder / NoEventsTextureName));
+			Texture = NewObject<UTexture2D>(Package, NoEventsTextureName, RF_Public | RF_Standalone | RF_Transactional);
+			FAssetRegistryModule::AssetCreated(Texture);
+		}
+		Texture->Source.Init(EventSlots, 2, 1, 1, TSF_BGRA8, Zero.GetData());
+		Texture->SRGB = false;
+		Texture->CompressionSettings = TC_VectorDisplacementmap;
+		Texture->Filter = TF_Nearest;
+		Texture->MipGenSettings = TMGS_NoMipmaps;
+		Texture->PostEditChange();
+		Texture->MarkPackageDirty();
+		return Texture;
+	}
 
 	// Sets a float inside a struct UPROPERTY by name, for engine settings
 	// reached through reflection (see EclipseBridge::SetBoolProperty).
@@ -404,25 +461,37 @@ namespace
 		Common.Add(TEXT("UV1"), Coords1);
 		Common.Add(TEXT("Growth"), Growth);
 		Common.Add(TEXT("Softness"), Softness);
-		Common.Add(TEXT("BurnSoftness"), BurnSoftness);
 
-		// Burn spheres: Burn# holds the centre (RGB, world space) and radius
-		// (A). The distance is taken by the engine's Distance node so it stays
-		// precise in large worlds.
+		// Burns and outbreaks, set by the Eclipse Spread component at runtime.
+		// The world position minus EventOrigin is taken in the engine's
+		// large-world precision; what reaches the Custom node is small.
 		auto* World = UMaterialEditingLibrary::CreateMaterialExpression(M, UMaterialExpressionWorldPosition::StaticClass(), -1500, 400);
-		for (int32 Index = 0; Index < 4; ++Index)
-		{
-			const FString Name = FString::Printf(TEXT("Burn%d"), Index);
-			auto* Burn = Colour(M, *Name, FLinearColor(0.0f, 0.0f, 0.0f, 0.0f), 560 + Index * 140);
-			Burn->Group = TEXT("Eclipse Burns");
-			auto* Distance = UMaterialEditingLibrary::CreateMaterialExpression(M, UMaterialExpressionDistance::StaticClass(), -900, 340 + Index * 140);
-			UMaterialEditingLibrary::ConnectMaterialExpressions(World, TEXT(""), Distance, TEXT("A"));
-			UMaterialEditingLibrary::ConnectMaterialExpressions(Burn, TEXT(""), Distance, TEXT("B"));
-			const FString DistanceInput = FString::Printf(TEXT("D%d"), Index);
-			const FString RadiusInput = FString::Printf(TEXT("R%d"), Index);
-			Common.Add(*DistanceInput, Distance);
-			Common.Add(*RadiusInput, Burn, TEXT("A"));
-		}
+		auto* EventOrigin = Colour(M, TEXT("EventOrigin"), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f), 560);
+		EventOrigin->Group = TEXT("Eclipse Events");
+		auto* Relative = UMaterialEditingLibrary::CreateMaterialExpression(M, UMaterialExpressionSubtract::StaticClass(), -1200, 450);
+		UMaterialEditingLibrary::ConnectMaterialExpressions(World, TEXT(""), Relative, TEXT("A"));
+		UMaterialEditingLibrary::ConnectMaterialExpressions(EventOrigin, TEXT(""), Relative, TEXT("B"));
+		auto* Events = Cast<UMaterialExpressionTextureObjectParameter>(
+			UMaterialEditingLibrary::CreateMaterialExpression(M, UMaterialExpressionTextureObjectParameter::StaticClass(), -1500, 700));
+		Events->ParameterName = TEXT("Events");
+		Events->Group = TEXT("Eclipse Events");
+		Events->Texture = Detail.NoEvents;
+		Events->AutoSetSampleType();
+		auto* BurnCount = Scalar(M, TEXT("BurnCount"), 0.0f, 620, TEXT("Eclipse Events"));
+		auto* OutbreakCount = Scalar(M, TEXT("OutbreakCount"), 0.0f, 700, TEXT("Eclipse Events"));
+		auto* OutbreakSoftness = Scalar(M, TEXT("OutbreakSoftness"), 30.0f, 780, TEXT("Eclipse Events"));
+		auto* OutbreakRoughness = Scalar(M, TEXT("OutbreakRoughness"), 60.0f, 860, TEXT("Eclipse Events"));
+		FInputs EventInputs;
+		EventInputs.Add(TEXT("EP"), Relative);
+		EventInputs.Add(TEXT("UV"), Coords);
+		EventInputs.Add(TEXT("Events"), Events);
+		EventInputs.Add(TEXT("BurnCount"), BurnCount);
+		EventInputs.Add(TEXT("OutbreakCount"), OutbreakCount);
+		EventInputs.Add(TEXT("BurnSoftness"), BurnSoftness);
+		EventInputs.Add(TEXT("OutbreakSoftness"), OutbreakSoftness);
+		EventInputs.Add(TEXT("OutbreakRoughness"), OutbreakRoughness);
+		auto* EventsNode = Custom(M, TEXT("Eclipse Events"), EventsCode, CMOT_Float3, EventInputs, 450, /*bPrelude*/ false);
+		Common.Add(TEXT("EV"), EventsNode);
 
 		FInputs DetailInputs = Common;
 		DetailInputs.Add(TEXT("PL"), LocalPosition);
@@ -624,6 +693,11 @@ bool FEclipseMaterials::Ensure(const FString& OutputFolder, bool bRebuild, FEcli
 	Detail.Chitin = LoadQuietly<UTexture2D>(Folder / ChitinTextureName, ChitinTextureName);
 	Detail.Flesh = LoadQuietly<UTexture2D>(Folder / FleshTextureName, FleshTextureName);
 	Detail.Capillaries = LoadQuietly<UTexture2D>(Folder / CapillaryTextureName, CapillaryTextureName);
+	Detail.NoEvents = LoadQuietly<UTexture2D>(Folder / NoEventsTextureName, NoEventsTextureName);
+	if (!Detail.NoEvents || bRebuild)
+	{
+		Detail.NoEvents = BuildNoEventsTexture(Folder, Detail.NoEvents);
+	}
 	if (!Detail.Capillaries || bRebuild)
 	{
 		Detail.Capillaries = BuildDetailTexture(Folder, CapillaryTextureName, eclipse::DetailKind::Capillaries, Detail.Capillaries);

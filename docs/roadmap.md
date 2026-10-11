@@ -89,10 +89,17 @@ Next on characters: strands that swing (physics or AnimDynamics), carrying morph
 
 Next here: painting masks directly on surfaces (vertex paint) as well as volumes.
 
+## Runtime features (done)
+
+- **Outbreaks**: `StartOutbreak` reveals the grown corruption outward from a hit point, its front following the corruption's own arrival order and glowing as it advances.
+- **Permanent burn scars**: 64 kept apart, then merged into enclosing spheres so none ever heal; burns and outbreaks reach the material through an event texture relative to the owner, safe in large worlds.
+- **VFX and audio hooks**: `OnBurned`, `OnOutbreakStarted`, `OnOutbreakFinished` with location and radius.
+- **Gameplay sensing**: the Eclipse Infection world subsystem (query, burn and start outbreaks anywhere without knowing the actor) and the Eclipse Infection Sensor component (enter, leave and per-check events for damage, audio and AI).
+
+Next here: growing new corruption on the fly onto meshes that were never grown (a runtime generator call off the game thread), and replicating burns and outbreaks for multiplayer.
+
 ## Later
 
 - Strands that swing (physics or AnimDynamics) on characters.
-- Seeding new outbreaks at runtime, growing on the fly where the player is.
-- Permanent, unlimited burn scars (a render-target mask instead of four spheres).
 - Tearing the host silhouette at late stage.
 - Cutting into the host: a portal or burrow carved into a wall (maws are raised craters for now).

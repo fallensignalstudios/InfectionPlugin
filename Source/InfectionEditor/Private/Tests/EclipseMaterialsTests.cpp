@@ -35,13 +35,22 @@ bool FEclipseMaterialsBuildTest::RunTest(const FString& Parameters)
 		{
 			return false;
 		}
-		// The Eclipse Spread component drives exactly these two.
+		// The Eclipse Spread component drives these.
 		float Value = 0.0f;
 		TestTrue(TEXT("Every instance takes Growth"), Instance->GetScalarParameterValue(FHashedMaterialParameterInfo(TEXT("Growth")), Value));
 		TestTrue(TEXT("Every instance takes BurnSoftness"),
 			Instance->GetScalarParameterValue(FHashedMaterialParameterInfo(TEXT("BurnSoftness")), Value));
 		TestTrue(TEXT("Every instance takes DetailScale"),
 			Instance->GetScalarParameterValue(FHashedMaterialParameterInfo(TEXT("DetailScale")), Value));
+		for (const TCHAR* Name : {TEXT("BurnCount"), TEXT("OutbreakCount"), TEXT("OutbreakSoftness"), TEXT("OutbreakRoughness")})
+		{
+			TestTrue(FString::Printf(TEXT("Every instance takes %s"), Name),
+				Instance->GetScalarParameterValue(FHashedMaterialParameterInfo(Name), Value));
+		}
+		UTexture* Events = nullptr;
+		TestTrue(TEXT("Every instance takes the Events texture"),
+			Instance->GetTextureParameterValue(FHashedMaterialParameterInfo(TEXT("Events")), Events));
+		TestNotNull(TEXT("with an empty default"), Events);
 	}
 	float Reach = 0.0f;
 	TestTrue(TEXT("Surfaces carry the halo"),

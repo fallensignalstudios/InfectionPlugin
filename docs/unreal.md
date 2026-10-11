@@ -168,12 +168,46 @@ on the host and on the actors attached to it.
 | `bSpreadOnBeginPlay`, `SpreadDuration` | Start from nothing when play begins and take this many seconds to finish. |
 | `StartSpread`, `Recede`, `SetPlayRate`, `SetGrowth` | Drive it from Blueprint: play forward, play backward, any speed, or jump. |
 | `OnSpreadFinished`, `OnFullyReceded` | Events at either end. |
-| `Burn(Location, Radius)`, `ClearBurns` | Cut the corruption away in a sphere; the edge smoulders with ember light (`EmberColor`, `BurnSoftness`). The four latest burns are kept. |
-| `GetInfectionAt(Location, Radius)`, `IsInfectedAt` | How infected a spot is right now (0..1): arrived, not burned. Use it for damage zones, AI avoidance, audio. |
+| `Burn(Location, Radius)`, `ClearBurns` | Cut the corruption away in a sphere; the edge smoulders with ember light (`EmberColor`, `BurnSoftness`). Scars are permanent: up to 64 are kept apart, and past that a new burn grows the nearest scar to enclose both, so burned tissue never comes back. |
+| `StartOutbreak(Location, MaxRadius, Speed)`, `ClearOutbreaks` | Reveal the grown corruption outward from a point, whatever `Growth` says: a sphere growing at `Speed` cm/s up to `MaxRadius` (speed 0 for all at once), its front glowing as it goes. Tissue that arrived late in the grown spread lags behind the front by up to 1.5 × `OutbreakRoughness`, so the front creeps along the corruption's own fingers rather than as a clean sphere; `OutbreakSoftness` is its width. Up to 64 at a time. |
+| `OnBurned`, `OnOutbreakStarted`, `OnOutbreakFinished` | Events with a world location and radius: hang sounds, Niagara bursts and camera shakes on them. `OnBurned` reports the scar as kept (after any merge). |
+| `GetInfectionAt(Location, Radius)`, `IsInfectedAt` | How infected a spot is right now (0..1): arrived or revealed by an outbreak, and not burned. Use it for damage zones, AI avoidance, audio. |
+| `GetBurnCount`, `GetOutbreakCount`, `GetWorldBounds` | What it holds, and the world box around its corruption. |
+
+### Without knowing which actor: the Eclipse Infection subsystem
+
+Gameplay usually knows a world point, not which infected actor is there. The
+**Eclipse Infection** world subsystem (`Get World Subsystem` in Blueprint) knows
+every spread in the level:
+
+| | |
+|---|---|
+| `GetInfectionAt(Location, Radius)`, `IsInfectedAt` | The strongest infection there, across every infected actor. |
+| `BurnAt(Location, Radius)` | Burn every spread the sphere reaches: a flamethrower or grenade calls this where it hits. Returns how many. |
+| `StartOutbreakAt(Location, MaxRadius, Speed)` | Start an outbreak on every spread within `MaxRadius`: a spore pod bursting, a projectile landing. |
+| `GetSpreadsNear(Location, Radius)` | The spread components themselves, to drive them directly. |
+
+### Senses for pawns and AI: the Eclipse Infection Sensor
+
+Add an **Eclipse Infection Sensor** component to a pawn (at its feet, or on a
+weapon muzzle, or anywhere). Every `Interval` seconds (0.2) it asks the
+subsystem about `SearchRadius` around itself and fires:
+
+- `OnEnterInfection(Infection)` when it reaches `Threshold` (0.5),
+- `OnLeaveInfection` when it drops below (walked off, burned, receded),
+- `OnInfectionTick(Infection, DeltaSeconds)` on every check while on it:
+  apply damage as `Rate × Infection × DeltaSeconds`, slow the pawn, or drive
+  a heartbeat sound.
+
+`Sense()` checks at once; `GetInfection` and `IsInInfection` give the last
+result. For AI, call the subsystem's `IsInfectedAt` from an EQS or a
+Behaviour Tree service to keep a pawn off the corruption, or onto it.
 
 Notes:
-- Burns and queries need the materials from this version: press **Rebuild
-  Materials** once if you grew with an earlier one.
+- Burns, outbreaks and queries need the materials from this version: press
+  **Rebuild Materials** once if you grew with an earlier one. Burns and
+  outbreaks reach the materials as a small event texture (`Events`, positions
+  relative to `EventOrigin`, so they stay exact far from the world origin).
 - Saved growth settings retain their old values. To use the revised darker
   palette, reset the colour, vein and seam settings to their defaults before
   growing again.
@@ -230,7 +264,8 @@ editor. Parameters:
 | `CarapaceColor`, `CarapaceTint` | near-black, violet | The shell; the tint varies per plate. |
 | `GlowColor` | violet | |
 | `EmberColor`, `BurnSoftness` | orange, 40 cm | The smouldering edge of a burn, and its width. |
-| `Burn0`..`Burn3` | unused | Set by the Eclipse Spread component: centre in RGB, radius in A. |
+| `Events`, `EventOrigin`, `BurnCount`, `OutbreakCount` | empty | Set by the Eclipse Spread component: its burns and outbreaks. |
+| `OutbreakSoftness`, `OutbreakRoughness` | 30, 60 cm | Width of an outbreak's front, and how far late-arriving tissue lags behind it (also on the component). |
 | `InflamedColor` | dark magenta | Tissue at the front, before it blackens. |
 | `HostColor` | grey | Clean tissue, Replace mode only. |
 | `ClearCoatRoughness` | 0.06 | The wet sheen. |
