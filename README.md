@@ -12,7 +12,7 @@ Engine 5.8.
 This repository is an **Unreal Engine 5.8 plugin**: clone it into a project's
 `Plugins` folder and grow corruption over static meshes and animated
 characters in the level from **Tools → Eclipse Growth**, then let it spread,
-recede and burn back during play. See [docs/unreal.md](docs/unreal.md).
+recede, burn back and break out during play, and sense it from gameplay. See [docs/unreal.md](docs/unreal.md).
 
 The generator at its heart is standard C++20 with no third-party dependency, so
 the same sources build into the plugin, a command-line tool and the tests.
@@ -183,7 +183,7 @@ glTF uses +Y up and metres. Unreal's glTF importer converts to +Z up and centime
 ```
 InfectionPlugin.uplugin   the plugin descriptor
 Source/EclipseCore/       the generator (Public/eclipse, Private): plain C++, no engine headers
-Source/InfectionRuntime/  the Eclipse Seed actor, Follower and Spread components, infection maps
+Source/InfectionRuntime/  the Eclipse Seed and Mask actors, Follower, Spread and Sensor components, the Infection subsystem, infection maps
 Source/InfectionEditor/   the Eclipse Growth panel, mesh conversion, assets and materials
 Resources/                plugin icon
 cli/                      eclipse-cli

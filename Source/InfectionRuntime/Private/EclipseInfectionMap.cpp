@@ -9,6 +9,7 @@ void UEclipseInfectionMap::SetSamples(TArray<FVector3f>&& InPoints, TArray<float
 	Spacing = InSpacing;
 	Grid.Reset();
 	GridCell = 0.0f;
+	Bounds = FBox(ForceInit);
 }
 
 void UEclipseInfectionMap::PostLoad()
@@ -16,6 +17,7 @@ void UEclipseInfectionMap::PostLoad()
 	Super::PostLoad();
 	Grid.Reset();
 	GridCell = 0.0f;
+	Bounds = FBox(ForceInit);
 }
 
 #if WITH_EDITOR
@@ -25,6 +27,7 @@ void UEclipseInfectionMap::PostEditUndo()
 	// The samples may have changed under the grid.
 	Grid.Reset();
 	GridCell = 0.0f;
+	Bounds = FBox(ForceInit);
 }
 #endif
 
@@ -45,10 +48,22 @@ void UEclipseInfectionMap::BuildGridIfNeeded() const
 
 float UEclipseInfectionMap::InfectionAt(const FVector& ActorSpacePoint, float Radius, float Growth) const
 {
-	return InfectionAt(ActorSpacePoint, Radius, Growth, [](const FVector3f&) { return true; });
+	return InfectionAt(ActorSpacePoint, Radius, Growth, [](const FVector3f&, float) { return true; });
 }
 
-float UEclipseInfectionMap::InfectionAt(float Growth, TFunctionRef<bool(const FVector3f&)> AcceptSample) const
+FBox UEclipseInfectionMap::GetBounds() const
+{
+	if (!Bounds.IsValid)
+	{
+		for (const FVector3f& P : Points)
+		{
+			Bounds += FVector(P);
+		}
+	}
+	return Bounds;
+}
+
+float UEclipseInfectionMap::InfectionAt(float Growth, TFunctionRef<bool(const FVector3f&, float)> AcceptSample) const
 {
 	if (Arrival.Num() != Points.Num() || Infection.Num() != Points.Num())
 	{
@@ -57,7 +72,7 @@ float UEclipseInfectionMap::InfectionAt(float Growth, TFunctionRef<bool(const FV
 	float Best = 0.0f;
 	for (int32 Index = 0; Index < Points.Num(); ++Index)
 	{
-		if (Arrival[Index] <= Growth && AcceptSample(Points[Index]))
+		if (Arrival[Index] <= Growth && AcceptSample(Points[Index], Arrival[Index]))
 		{
 			Best = FMath::Max(Best, Infection[Index]);
 		}
@@ -66,7 +81,7 @@ float UEclipseInfectionMap::InfectionAt(float Growth, TFunctionRef<bool(const FV
 }
 
 float UEclipseInfectionMap::InfectionAt(const FVector& ActorSpacePoint, float Radius, float Growth,
-	TFunctionRef<bool(const FVector3f&)> AcceptSample) const
+	TFunctionRef<bool(const FVector3f&, float)> AcceptSample) const
 {
 	BuildGridIfNeeded();
 	if (Grid.Num() == 0 || Arrival.Num() != Points.Num() || Infection.Num() != Points.Num())
@@ -80,7 +95,7 @@ float UEclipseInfectionMap::InfectionAt(const FVector& ActorSpacePoint, float Ra
 	auto Consider = [&](int32 Index)
 	{
 		if (Points.IsValidIndex(Index) && Arrival[Index] <= Growth && FVector3f::DistSquared(Points[Index], P) <= Reach * Reach &&
-			AcceptSample(Points[Index]))
+			AcceptSample(Points[Index], Arrival[Index]))
 		{
 			Best = FMath::Max(Best, Infection[Index]);
 		}

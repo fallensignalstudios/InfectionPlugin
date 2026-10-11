@@ -4,6 +4,8 @@
 
 #include "Components/SceneComponent.h"
 #include "EclipseInfectionMap.h"
+#include "EclipseInfectionSensorComponent.h"
+#include "EclipseInfectionSubsystem.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Misc/AutomationTest.h"
@@ -112,7 +114,7 @@ bool FEclipseSpreadBurnRadiusTest::RunTest(const FString& Parameters)
 	{
 		Fixture.Spread->Burn(FVector(1000 + Index * 100, 0, 0), Index % 2 == 0 ? 0.0f : -10.0f);
 	}
-	TestEqual(TEXT("Inactive burns cannot evict the active burn from the four-slot ring"),
+	TestEqual(TEXT("Inactive burns cannot evict or merge into the active burn"),
 		Fixture.Spread->GetInfectionAt(FVector::ZeroVector, 0.0f), 0.0f);
 
 	Fixture.Spread->ClearBurns();
@@ -166,6 +168,143 @@ bool FEclipseSpreadWorldDistanceTest::RunTest(const FString& Parameters)
 	Fixture.Sample(FVector3f(0, 1000, 0), 5.0f);
 	TestEqual(TEXT("A collapsed axis uses the sample's world position without an inverse-distance bound"),
 		Fixture.Spread->GetInfectionAt(FVector::ZeroVector, 0.0f), 1.0f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEclipseSpreadManyBurnsTest,
+	"Infection.Runtime.Spread.KeepsEveryBurnScar",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FEclipseSpreadManyBurnsTest::RunTest(const FString& Parameters)
+{
+	FSpreadQueryFixture Fixture;
+	if (!TestNotNull(TEXT("The temporary spread component exists"), Fixture.Spread))
+	{
+		return false;
+	}
+	Fixture.Sample(FVector3f::ZeroVector);
+	Fixture.Spread->Burn(FVector::ZeroVector, 20.0f);
+	for (int32 Index = 0; Index < 8; ++Index)
+	{
+		Fixture.Spread->Burn(FVector(1000 + Index * 100, 0, 0), 20.0f);
+	}
+	TestEqual(TEXT("More than four burns are all kept"), Fixture.Spread->GetBurnCount(), 9);
+	TestEqual(TEXT("The first burn still scars after eight more"), Fixture.Spread->GetInfectionAt(FVector::ZeroVector, 0.0f), 0.0f);
+
+	for (int32 Index = 0; Index < UEclipseSpreadComponent::MaxBurns * 2; ++Index)
+	{
+		Fixture.Spread->Burn(FVector(5000 + Index * 100, 0, 0), 20.0f);
+	}
+	TestEqual(TEXT("Burns beyond the limit merge instead of growing the list"),
+		Fixture.Spread->GetBurnCount(), UEclipseSpreadComponent::MaxBurns);
+	TestEqual(TEXT("Merging never lets a scar heal"), Fixture.Spread->GetInfectionAt(FVector::ZeroVector, 0.0f), 0.0f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEclipseSpreadOutbreakTest,
+	"Infection.Runtime.Spread.OutbreakRevealsFromItsCentre",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FEclipseSpreadOutbreakTest::RunTest(const FString& Parameters)
+{
+	FSpreadQueryFixture Fixture;
+	if (!TestNotNull(TEXT("The temporary spread component exists"), Fixture.Spread))
+	{
+		return false;
+	}
+	UEclipseSpreadComponent* Spread = Fixture.Spread;
+	Fixture.Sample(FVector3f::ZeroVector);
+	Spread->SetGrowth(0.0f);
+	TestEqual(TEXT("Nothing shows before the spread plays"), Spread->GetInfectionAt(FVector::ZeroVector, 0.0f), 0.0f);
+
+	// The sample arrived at 0, so it does not lag: it shows once the front is
+	// half of OutbreakSoftness past it, 115 cm from a centre 100 cm away.
+	Spread->OutbreakSoftness = 30.0f;
+	Spread->StartOutbreak(FVector(100, 0, 0), 300.0f, 100.0f);
+	TestEqual(TEXT("An outbreak is under way"), Spread->GetOutbreakCount(), 1);
+	TestEqual(TEXT("An outbreak starts from nothing"), Spread->GetInfectionAt(FVector::ZeroVector, 0.0f), 0.0f);
+	Spread->TickComponent(1.0f, LEVELTICK_All, &Spread->PrimaryComponentTick);
+	TestEqual(TEXT("The front has not reached the sample after one second"), Spread->GetInfectionAt(FVector::ZeroVector, 0.0f), 0.0f);
+	Spread->TickComponent(0.5f, LEVELTICK_All, &Spread->PrimaryComponentTick);
+	TestEqual(TEXT("The front has passed the sample after one and a half"), Spread->GetInfectionAt(FVector::ZeroVector, 0.0f), 1.0f);
+
+	Spread->Burn(FVector::ZeroVector, 20.0f);
+	TestEqual(TEXT("A burn still cuts an outbreak"), Spread->GetInfectionAt(FVector::ZeroVector, 0.0f), 0.0f);
+	Spread->ClearBurns();
+	Spread->ClearOutbreaks();
+	TestEqual(TEXT("Clearing outbreaks hides it again"), Spread->GetInfectionAt(FVector::ZeroVector, 0.0f), 0.0f);
+
+	Spread->StartOutbreak(FVector(100, 0, 0), 300.0f, 0.0f);
+	TestEqual(TEXT("Speed 0 reveals the whole sphere at once"), Spread->GetInfectionAt(FVector::ZeroVector, 0.0f), 1.0f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEclipseSubsystemTest,
+	"Infection.Runtime.Subsystem.RoutesToNearbySpreads",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FEclipseSubsystemTest::RunTest(const FString& Parameters)
+{
+	FSpreadQueryFixture Fixture;
+	if (!TestNotNull(TEXT("The temporary spread component exists"), Fixture.Spread))
+	{
+		return false;
+	}
+	UEclipseInfectionSubsystem* Infection = Fixture.World->GetSubsystem<UEclipseInfectionSubsystem>();
+	if (!TestNotNull(TEXT("The world has an infection subsystem"), Infection))
+	{
+		return false;
+	}
+	Fixture.Sample(FVector3f::ZeroVector);
+	TestEqual(TEXT("The subsystem finds the registered spread"), Infection->GetInfectionAt(FVector::ZeroVector, 10.0f), 1.0f);
+	TestEqual(TEXT("Nothing is far from it"), Infection->GetInfectionAt(FVector(5000, 0, 0), 10.0f), 0.0f);
+	TestEqual(TEXT("A burn far away reaches no spread"), Infection->BurnAt(FVector(5000, 0, 0), 20.0f), 0);
+	TestEqual(TEXT("A burn on the corruption reaches its spread"), Infection->BurnAt(FVector::ZeroVector, 20.0f), 1);
+	TestTrue(TEXT("and burns it"), !Infection->IsInfectedAt(FVector::ZeroVector, 0.0f));
+
+	Fixture.Spread->ClearBurns();
+	Fixture.Spread->SetGrowth(0.0f);
+	TestEqual(TEXT("An outbreak on the corruption reaches its spread"), Infection->StartOutbreakAt(FVector::ZeroVector, 200.0f, 0.0f), 1);
+	TestTrue(TEXT("and reveals it"), Infection->IsInfectedAt(FVector::ZeroVector, 0.0f));
+
+	Fixture.Spread->UnregisterComponent();
+	TestEqual(TEXT("An unregistered spread is forgotten"), Infection->GetInfectionAt(FVector::ZeroVector, 10.0f), 0.0f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEclipseSensorTest,
+	"Infection.Runtime.Sensor.EntersAndLeaves",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FEclipseSensorTest::RunTest(const FString& Parameters)
+{
+	FSpreadQueryFixture Fixture;
+	if (!TestNotNull(TEXT("The temporary spread component exists"), Fixture.Spread))
+	{
+		return false;
+	}
+	Fixture.Sample(FVector3f::ZeroVector);
+	AActor* Walker = Fixture.World->SpawnActor<AActor>();
+	if (!TestNotNull(TEXT("The walker exists"), Walker))
+	{
+		return false;
+	}
+	UEclipseInfectionSensorComponent* Sensor = NewObject<UEclipseInfectionSensorComponent>(Walker, NAME_None, RF_Transient);
+	Walker->SetRootComponent(Sensor);
+	Walker->AddInstanceComponent(Sensor);
+	Sensor->RegisterComponent();
+	Sensor->SearchRadius = 10.0f;
+
+	Walker->SetActorLocation(FVector(500, 0, 0));
+	Sensor->Sense();
+	TestFalse(TEXT("Off the corruption"), Sensor->IsInInfection());
+	Walker->SetActorLocation(FVector(0, 0, 5));
+	Sensor->Sense();
+	TestTrue(TEXT("Stepped onto it"), Sensor->IsInInfection());
+	TestEqual(TEXT("Senses its strength"), Sensor->GetInfection(), 1.0f);
+	Fixture.Spread->Burn(FVector::ZeroVector, 40.0f);
+	Sensor->Sense();
+	TestFalse(TEXT("Burned away under it"), Sensor->IsInInfection());
 	return true;
 }
 

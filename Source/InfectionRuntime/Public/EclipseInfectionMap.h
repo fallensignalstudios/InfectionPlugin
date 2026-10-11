@@ -37,12 +37,16 @@ public:
 	float InfectionAt(const FVector& ActorSpacePoint, float Radius, float Growth) const;
 
 	// The same local search, accepting only samples that also pass a caller's
-	// world-distance or visibility check. The grid remains the broad phase.
+	// world-distance or visibility check, given each sample's position and
+	// arrival. The grid remains the broad phase.
 	float InfectionAt(const FVector& ActorSpacePoint, float Radius, float Growth,
-		TFunctionRef<bool(const FVector3f&)> AcceptSample) const;
+		TFunctionRef<bool(const FVector3f&, float)> AcceptSample) const;
 
 	// Scan without a local-distance bound when an actor transform is singular.
-	float InfectionAt(float Growth, TFunctionRef<bool(const FVector3f&)> AcceptSample) const;
+	float InfectionAt(float Growth, TFunctionRef<bool(const FVector3f&, float)> AcceptSample) const;
+
+	// The actor-space box around every sample (empty when there are none).
+	FBox GetBounds() const;
 
 	void SetSamples(TArray<FVector3f>&& InPoints, TArray<float>&& InArrival, TArray<float>&& InInfection, float InSpacing);
 
@@ -57,4 +61,5 @@ private:
 	// Built on first query, never saved; game thread only.
 	mutable TMap<FIntVector, TArray<int32>> Grid;
 	mutable float GridCell = 0.0f;
+	mutable FBox Bounds = FBox(ForceInit);
 };
