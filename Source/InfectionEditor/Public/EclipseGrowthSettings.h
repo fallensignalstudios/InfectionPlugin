@@ -6,6 +6,8 @@
 
 #include "EclipseGrowthSettings.generated.h"
 
+class UPhysicalMaterial;
+
 UENUM()
 enum class EEclipseOutputMode : uint8
 {
@@ -15,6 +17,19 @@ enum class EEclipseOutputMode : uint8
 	// The whole host replaced by the corrupted surface, its clean areas shaded
 	// with the material's Host Color. For untextured or throwaway hosts.
 	Replace,
+};
+
+// What a part of the output collides with.
+UENUM()
+enum class EEclipseCollision : uint8
+{
+	// Nothing: the host's own collision is all there is.
+	None,
+	// Visibility traces hit it (weapon impacts, decals, burn targeting,
+	// footstep surface checks); pawns and physics pass through.
+	Traces,
+	// Blocks everything, pawns included, and shapes the navigation mesh.
+	Block,
 };
 
 // Named looks (see eclipse/presets.h); same order as eclipse::Preset.
@@ -297,4 +312,33 @@ public:
 
 	UPROPERTY(EditAnywhere, Config, Category = "Output", meta = (ClampMin = "0", ClampMax = "5", Units = "cm", EditCondition = "bEnableNanite && bNaniteDisplacement"))
 	float DisplacementDepth = 0.8f;
+
+	// --- Performance --------------------------------------------------------
+
+	// Levels of detail on the generated meshes, LOD 0 included, each reduced
+	// by the engine from the one before. Nanite meshes need none and keep
+	// one; characters always get them.
+	UPROPERTY(EditAnywhere, Config, Category = "Performance", meta = (ClampMin = "1", ClampMax = "6"))
+	int32 LODCount = 4;
+
+	// The share of triangles each level keeps of the one before.
+	UPROPERTY(EditAnywhere, Config, Category = "Performance", meta = (ClampMin = "0.1", ClampMax = "0.9", EditCondition = "LODCount > 1"))
+	float LODReduction = 0.5f;
+
+	// --- Collision ----------------------------------------------------------
+
+	// The corrupted surface (shell or replacement). The host keeps its own
+	// collision either way; in Replace mode it is hidden but still collides.
+	UPROPERTY(EditAnywhere, Config, Category = "Collision")
+	EEclipseCollision SurfaceCollision = EEclipseCollision::Traces;
+
+	// Horns, roots, hearts, formations and soft tissue. Block makes pawns
+	// walk around (and over) them.
+	UPROPERTY(EditAnywhere, Config, Category = "Collision")
+	EEclipseCollision GrowthCollision = EEclipseCollision::Traces;
+
+	// The surface type traces report on the corruption, for footsteps and
+	// impact effects. Empty: the engine default.
+	UPROPERTY(EditAnywhere, Config, Category = "Collision")
+	TSoftObjectPtr<UPhysicalMaterial> PhysicalMaterial;
 };

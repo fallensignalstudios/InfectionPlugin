@@ -10,6 +10,7 @@
 #include "LODUtilities.h"
 #include "Materials/MaterialInterface.h"
 #include "MeshDescription.h"
+#include "PhysicsEngine/BodySetup.h"
 #include "SkeletalMeshAttributes.h"
 #include "StaticMeshAttributes.h"
 #include "UObject/Package.h"
@@ -280,9 +281,15 @@ namespace EclipseBridge
 		}
 	}
 
-	UStaticMesh* WriteStaticMesh(const FString& PackagePath, const FString& AssetName, FMeshDescription&& Description,
-		UMaterialInterface* Material, FName SlotName, bool bNanite, FText& OutError)
+	float LODTriangleShare(int32 Index, float Reduction)
 	{
+		return FMath::Pow(FMath::Clamp(Reduction, 0.01f, 1.0f), static_cast<float>(FMath::Max(Index, 0)));
+	}
+
+	UStaticMesh* WriteStaticMesh(const FString& PackagePath, const FString& AssetName, FMeshDescription&& Description,
+		UMaterialInterface* Material, FName SlotName, const FOutputOptions& Options, FText& OutError)
+	{
+		const bool bNanite = Options.bNanite;
 		const FString PackageName = PackagePath / AssetName;
 		UPackage* Package = CreatePackage(*PackageName);
 		if (!Package)
@@ -303,17 +310,23 @@ namespace EclipseBridge
 			Mesh->Modify();
 		}
 
-		if (Mesh->GetNumSourceModels() == 0)
+		// LOD 0 from the description; any further LODs reduced from it when
+		// the mesh builds. Nanite simplifies on its own and needs none.
+		const int32 LODCount = bNanite ? 1 : FMath::Clamp(Options.LODCount, 1, 8);
+		Mesh->SetNumSourceModels(LODCount);
+		for (int32 LOD = 0; LOD < LODCount; ++LOD)
 		{
-			Mesh->AddSourceModel();
+			FStaticMeshSourceModel& Source = Mesh->GetSourceModel(LOD);
+			Source.BuildSettings.bRecomputeNormals = false;
+			Source.BuildSettings.bRecomputeTangents = true;
+			Source.BuildSettings.bUseMikkTSpace = true;
+			Source.BuildSettings.bGenerateLightmapUVs = false;
+			Source.BuildSettings.bRemoveDegenerates = false;
+			Source.BuildSettings.bUseFullPrecisionUVs = true;  // UV 0 carries arrival times, not texture coordinates
+			Source.ReductionSettings.PercentTriangles = LODTriangleShare(LOD, Options.LODReduction);
+			Source.ReductionSettings.PercentVertices = Source.ReductionSettings.PercentTriangles;
 		}
-		FStaticMeshSourceModel& Source = Mesh->GetSourceModel(0);
-		Source.BuildSettings.bRecomputeNormals = false;
-		Source.BuildSettings.bRecomputeTangents = true;
-		Source.BuildSettings.bUseMikkTSpace = true;
-		Source.BuildSettings.bGenerateLightmapUVs = false;
-		Source.BuildSettings.bRemoveDegenerates = false;
-		Source.BuildSettings.bUseFullPrecisionUVs = true;  // UV 0 carries arrival times, not texture coordinates
+		Mesh->bAutoComputeLODScreenSize = true;
 
 		TArray<FStaticMaterial> Materials;
 		Materials.Add(FStaticMaterial(Material, SlotName, SlotName));
@@ -333,6 +346,17 @@ namespace EclipseBridge
 			}
 		}
 
+		// Collision against the corruption's own triangles: its shapes are too
+		// organic for boxes and hulls. Whether anything collides with it is
+		// the placed component's collision setting.
+		Mesh->CreateBodySetup();
+		if (UBodySetup* Body = Mesh->GetBodySetup())
+		{
+			Body->Modify();
+			Body->CollisionTraceFlag = Options.bCollision ? CTF_UseComplexAsSimple : CTF_UseDefault;
+			Body->InvalidatePhysicsData();
+		}
+
 		// PostEditChange rebuilds the render data (Nanite included) once.
 		Mesh->PostEditChange();
 		if (bCreated)
@@ -344,7 +368,8 @@ namespace EclipseBridge
 	}
 
 	USkeletalMesh* WriteSkeletalMesh(USkeletalMesh* Template, const FString& PackagePath, const FString& AssetName,
-		FMeshDescription&& Description, UMaterialInterface* Material, FName SlotName, FText& OutError)
+		FMeshDescription&& Description, UMaterialInterface* Material, FName SlotName, FText& OutError,
+		const FOutputOptions& Options)
 	{
 		if (Template->GetMeshClothingAssets().Num() > 0)
 		{
@@ -436,6 +461,21 @@ namespace EclipseBridge
 		FMeshDescription* Target = Mesh->CreateMeshDescription(0);
 		*Target = MoveTemp(Description);
 		Mesh->CommitMeshDescription(0);
+
+		// Reduced LODs, generated from LOD 0 when the mesh builds (they have
+		// no source geometry of their own). Followers take the host's LOD
+		// level, clamped to the LODs they have.
+		const int32 LODCount = FMath::Clamp(Options.LODCount, 1, 8);
+		for (int32 LOD = 1; LOD < LODCount; ++LOD)
+		{
+			FSkeletalMeshLODInfo& Info = Mesh->AddLODInfo();
+			Info.ReductionSettings = FSkeletalMeshOptimizationSettings();
+			Info.ReductionSettings.NumOfTrianglesPercentage = LODTriangleShare(LOD, Options.LODReduction);
+			Info.ReductionSettings.BaseLOD = 0;
+			Info.ScreenSize = FPerPlatformFloat(FMath::Pow(0.5f, static_cast<float>(LOD)));
+			Info.BuildSettings = Mesh->GetLODInfo(0)->BuildSettings;
+			Info.LODMaterialMap.Empty();
+		}
 		Mesh->PostEditChange();
 		if (bCreated)
 		{

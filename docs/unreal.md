@@ -76,6 +76,30 @@ rather than exceed **Max Vertices**.
 Vertices that are split along UV or smoothing seams are welded first, so the
 spread crosses those seams. Generated meshes have Nanite enabled by default.
 
+### LODs and collision
+
+**Performance → LOD Count** (4) and **LOD Reduction** (0.5): with Nanite off,
+each generated static mesh carries this many levels of detail, each reduced by
+the engine from LOD 0 to keep half the triangles of the one before; screen
+sizes are computed automatically. Nanite meshes keep one (Nanite simplifies
+on its own). Character outputs always get the reduced LODs, and a follower
+shows the LOD its character is at. On an Overlay shell a far LOD can sink
+under the host in places; lower the LOD count or use Nanite if it shows.
+
+**Collision** is set separately for the surface and for the growths (horns,
+roots, hearts, formations and soft tissue):
+
+| | |
+|---|---|
+| **None** | Nothing collides with it; the host's own collision is all there is. |
+| **Traces** (default) | Visibility traces hit it, against its own triangles: weapon impacts, decals, aiming a burn, footstep surface checks. Pawns and physics pass through, and it leaves the navigation mesh alone. |
+| **Block** | Blocks everything (the `BlockAllDynamic` profile) and shapes the navigation mesh: pawns walk around horns and over roots. |
+
+**Physical Material** is the surface type those hits report (for footsteps and
+impact effects); empty uses the engine default. Character followers never
+collide; the character's physics asset does. Change a placed output's
+collision afterwards like any actor's; growing again resets it from the panel.
+
 ### Rooms and masks
 
 Select every mesh of a room (floor tiles, walls, props) and press **Grow on
@@ -137,7 +161,7 @@ seeds go where the corruption should start on that pose.
 
 The result is two skeletal meshes on the host's own skeleton,
 `SK_Eclipse_<Host>_Shell`, `SK_Eclipse_<Host>_Growths` and `SK_Eclipse_<Host>_Flesh`, each a copy of the
-host mesh reduced to one LOD and one material. Every vertex carries bone
+host mesh with one material and its own reduced LODs (see LODs and collision). Every vertex carries bone
 weights: the shell takes the weights of the skin it lies on, and growths blend
 the weights of the tissue nearest them, so a strand follows the limb it hangs
 from and a membrane between arm and torso stretches with both.
