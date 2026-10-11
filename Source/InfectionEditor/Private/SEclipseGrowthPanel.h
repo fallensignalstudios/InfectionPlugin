@@ -17,6 +17,7 @@ public:
 private:
 	FReply OnGrow();
 	FReply OnAddSeed();
+	FReply OnRemove();
 	FReply OnVariation(int32 Step);
 	FReply OnRebuildMaterials();
 

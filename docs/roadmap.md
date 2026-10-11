@@ -96,7 +96,14 @@ Next here: painting masks directly on surfaces (vertex paint) as well as volumes
 - **VFX and audio hooks**: `OnBurned`, `OnOutbreakStarted`, `OnOutbreakFinished` with location and radius.
 - **Gameplay sensing**: the Eclipse Infection world subsystem (query, burn and start outbreaks anywhere without knowing the actor) and the Eclipse Infection Sensor component (enter, leave and per-check events for damage, audio and AI).
 
-Next here: growing new corruption on the fly onto meshes that were never grown (a runtime generator call off the game thread), and replicating burns and outbreaks for multiplayer.
+Next here: growing new corruption on the fly onto meshes that were never grown (a runtime generator call off the game thread).
+
+## Production hardening (done)
+
+- **Multiplayer**: the Spread component replicates growth, playback, burns and outbreaks; late joiners place each outbreak's front from its server start time.
+- **Save games**: `GetState` / `RestoreState` with an `Eclipse Spread State`.
+- **Remove from Selected** in the panel (and `UEclipseEditorLibrary::RemoveFromSelection`): undoable clean-up that shows hosts a Replace grow hid.
+- A `LogEclipse` log category, a changelog, and the plugin version in step with it.
 
 ## Later
 

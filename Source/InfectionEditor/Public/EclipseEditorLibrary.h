@@ -20,6 +20,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Eclipse|Editor")
 	static FText GrowOnSelection(UEclipseGrowthSettings* Settings);
 
+	// Remove the corruption from the selected hosts, as the panel's Remove button does.
+	UFUNCTION(BlueprintCallable, Category = "Eclipse|Editor")
+	static FText RemoveFromSelection();
+
 	// Rebuild the Eclipse material assets in Settings' output folder, unsaved.
 	UFUNCTION(BlueprintCallable, Category = "Eclipse|Editor")
 	static FText RebuildMaterials(UEclipseGrowthSettings* Settings);

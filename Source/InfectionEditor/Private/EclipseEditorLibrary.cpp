@@ -43,6 +43,12 @@ FText UEclipseEditorLibrary::GrowOnSelection(UEclipseGrowthSettings* Settings)
 	return Error.IsEmpty() ? EclipseGrowthRunner::GrowOnSelection(*Settings) : Error;
 }
 
+FText UEclipseEditorLibrary::RemoveFromSelection()
+{
+	const FText Error = ValidateEditorState();
+	return Error.IsEmpty() ? EclipseGrowthRunner::RemoveFromSelection() : Error;
+}
+
 FText UEclipseEditorLibrary::RebuildMaterials(UEclipseGrowthSettings* Settings)
 {
 	const FText Error = ValidateEditorCall(Settings);

@@ -308,4 +308,43 @@ bool FEclipseSensorTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEclipseSpreadStateTest,
+	"Infection.Runtime.Spread.SavesAndRestoresState",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FEclipseSpreadStateTest::RunTest(const FString& Parameters)
+{
+	FSpreadQueryFixture Saved;
+	FSpreadQueryFixture Loaded;
+	if (!TestNotNull(TEXT("The saved spread exists"), Saved.Spread) || !TestNotNull(TEXT("The loaded spread exists"), Loaded.Spread))
+	{
+		return false;
+	}
+	TestTrue(TEXT("The spread replicates by default"), Saved.Spread->GetIsReplicated());
+
+	Saved.Sample(FVector3f::ZeroVector);
+	Loaded.Sample(FVector3f::ZeroVector);
+	Saved.Spread->SetGrowth(0.0f);
+	Saved.Spread->StartOutbreak(FVector(100, 0, 0), 300.0f, 100.0f);
+	Saved.Spread->TickComponent(1.5f, LEVELTICK_All, &Saved.Spread->PrimaryComponentTick);
+	Saved.Spread->Burn(FVector(0, 500, 0), 20.0f);
+	const FEclipseSpreadState State = Saved.Spread->GetState();
+	TestEqual(TEXT("The state holds the burn"), State.Burns.Num(), 1);
+	TestEqual(TEXT("The state holds the outbreak"), State.Outbreaks.Num(), 1);
+	TestEqual(TEXT("with its front where it had reached"), State.Outbreaks[0].Radius, 150.0f);
+
+	Loaded.Spread->RestoreState(State);
+	TestEqual(TEXT("Growth comes back"), Loaded.Spread->GetGrowth(), 0.0f);
+	TestEqual(TEXT("Burns come back"), Loaded.Spread->GetBurnCount(), 1);
+	TestEqual(TEXT("Outbreaks come back"), Loaded.Spread->GetOutbreakCount(), 1);
+	TestEqual(TEXT("A restored outbreak shows what it had revealed, without starting over"),
+		Loaded.Spread->GetInfectionAt(FVector::ZeroVector, 0.0f), 1.0f);
+
+	FEclipseSpreadState Huge = State;
+	Huge.Burns.Init(FVector4(0, 0, 0, 1), UEclipseSpreadComponent::MaxBurns + 5);
+	Loaded.Spread->RestoreState(Huge);
+	TestEqual(TEXT("A restored state is held to the burn limit"), Loaded.Spread->GetBurnCount(), UEclipseSpreadComponent::MaxBurns);
+	return true;
+}
+
 #endif
